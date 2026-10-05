@@ -76,6 +76,8 @@ jobs:
         with:
           name: FeedVibe-${{ env.VERSION_NAME }}
           path: dist/*.apk
+          # Pocos días: el almacenamiento gratuito de Actions es de solo 0,5 GB.
+          retention-days: 3
 
       # Cada push a main publica una Release: la app la detecta y se actualiza sola.
       - name: Publicar Release
