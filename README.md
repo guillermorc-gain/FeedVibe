@@ -4,6 +4,8 @@
 
 ![Vista previa](docs/preview.png)
 
+![Canales, selección múltiple y añadir desde la lupa](docs/preview-2.png)
+
 App Android estilo **Podcast Addict** para seguir canales de vídeo y feeds: ves de un vistazo qué episodios
 no has visto, los marcas como vistos y todo se **sincroniza al instante entre tus dispositivos** con tu cuenta de Google.
 
@@ -14,6 +16,9 @@ no has visto, los marcas como vistos y todo se **sincroniza al instante entre tu
 | **Fuentes** | YouTube (canal, @handle, vídeo o lista), Twitch (directos + vídeos), Dailymotion, Vimeo, Odysee, podcasts (buscador de Apple Podcasts) y cualquier web/blog con RSS/Atom (detecta el feed sola) |
 | **Canal entero de YouTube** | Además de los 15 últimos del RSS, botón **«Cargar todos»** para listar todos los vídeos del canal (YouTube Data API) |
 | **Novedades** | Episodios sin ver con filtros por plataforma y categoría, búsqueda y *pull to refresh* |
+| **Selección múltiple** | Pulsación larga en un episodio o canal; toque para añadir, pulsación larga en otro para seleccionar el rango. Marcar vistos/no vistos, ver más tarde, favoritos, compartir, seleccionar todo/arriba/abajo… En canales: marcar todo visto, categoría, notificaciones, dejar de seguir |
+| **Canales** | Cuadrícula de logos con tamaño ajustable (barra de zoom o pellizcando con dos dedos), con o sin nombres; orden por nombre A→Z / Z→A, sin ver, recientes, plataforma |
+| **Lupa** | Pega la dirección de un canal en la búsqueda y aparece «¿Añadir este canal?» |
 | **Visto / no visto** | Desliza → visto · desliza ← ver más tarde · pulsación larga → visto · "este y anteriores" · "todo el canal" |
 | **Sincronización** | Inicio de sesión con Google. Canales, vistos, *ver más tarde*, favoritos, posición de reproducción, apodo y foto se sincronizan **en tiempo real** (Cloud Firestore, también sin conexión) |
 | **Periodo de actualización** | Manual, 15 min, 30 min, 1 h, 2 h, 6 h, 12 h o diario · solo Wi-Fi · actualizar al abrir |
@@ -26,10 +31,13 @@ no has visto, los marcas como vistos y todo se **sincroniza al instante entre tu
 | **Actualizaciones** | Busca versiones nuevas en GitHub Releases, las descarga y las instala **sin salir de la app** |
 | **Compartir** | Desde YouTube/Twitch/navegador → *Compartir* → FeedVibe añade el canal |
 
-## Compilar
+## Compilar gratis
 
-GitHub Actions compila el APK en cada push (`.github/workflows/android.yml`) y cada push a `main` publica una
-Release `v1.0.N` con el APK (así se actualiza la app). En local: Android Studio (JDK 17) → *Run*, o `./gradlew assembleRelease`.
+- **GitHub Actions** (gratis e ilimitado en repositorios **públicos**): compila el APK en cada push
+  (`.github/workflows/android.yml`) y cada push a `main` publica una Release `v1.0.N` con el APK (así se actualiza la app).
+  En repositorios privados GitHub limita los minutos gratuitos y puede no asignar máquinas.
+- **Android Studio** (gratis, en tu ordenador): abrir la carpeta del proyecto → *Run* con el móvil conectado por USB,
+  o `./gradlew assembleRelease`.
 
 ## Inicio de sesión con Google y sincronización (Firebase)
 
