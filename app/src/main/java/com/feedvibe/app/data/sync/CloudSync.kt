@@ -53,6 +53,7 @@ class CloudSync(
 
     private fun userDoc(u: String) = firestore!!.collection("users").document(u)
 
+    @Synchronized
     fun start(newUid: String) {
         if (firestore == null || uid == newUid) return
         stop()
@@ -69,6 +70,7 @@ class CloudSync(
         }
     }
 
+    @Synchronized
     fun stop() {
         listeners.forEach { it.remove() }
         listeners.clear()
