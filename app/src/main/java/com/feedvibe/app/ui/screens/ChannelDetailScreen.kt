@@ -63,6 +63,8 @@ import com.feedvibe.app.data.prefs.AppSettings
 import com.feedvibe.app.ui.LocalContainer
 import com.feedvibe.app.ui.components.ChannelAvatar
 import com.feedvibe.app.ui.components.EpisodeRow
+import com.feedvibe.app.ui.components.EpisodeSelectionBar
+import com.feedvibe.app.ui.components.rememberSelectionState
 import com.feedvibe.app.ui.components.ScreenScaffold
 import com.feedvibe.app.ui.components.SourceBadge
 import com.feedvibe.app.ui.openUrl
@@ -95,12 +97,17 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
     val s = sub
 
     val visible = if (onlyUnwatched) episodes.filter { !it.watched } else episodes
+    val selection = rememberSelectionState()
+    selection.order = visible.map { it.episode.id }
     val unwatched = episodes.count { !it.watched }
 
     ScreenScaffold(
         title = s?.title ?: "",
         onBack = { nav.popBackStack() },
         snackbar = snackbar,
+        topBarOverride = if (selection.active) {
+            { EpisodeSelectionBar(selection, visible) }
+        } else null,
         actions = {
             if (s != null) {
                 IconButton(onClick = { scope.launch { feeds.updateSubscription(s.copy(notify = !s.notify)) } }) {
@@ -212,7 +219,7 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
                     }
                 }
                 items(visible, key = { it.episode.id }) { item ->
-                    EpisodeRow(item, settings.listStyle, callbacks, showChannel = false)
+                    EpisodeRow(item, settings.listStyle, callbacks, showChannel = false, selection = selection)
                 }
             }
         }

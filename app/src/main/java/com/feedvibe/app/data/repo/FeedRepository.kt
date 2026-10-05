@@ -301,6 +301,23 @@ class FeedRepository(
         setWatched(ids.filter { states[it]?.watched != true }, true)
     }
 
+    // ---------- Acciones sobre varios elementos (modo selección) ----------
+
+    suspend fun setWatchLater(ids: List<String>, value: Boolean) = updateStates(ids) { it.copy(watchLater = value) }
+
+    suspend fun setFavorite(ids: List<String>, value: Boolean) = updateStates(ids) { it.copy(favorite = value) }
+
+    /** Olvida por dónde ibas (posición de reproducción) en estos episodios. */
+    suspend fun resetProgress(ids: List<String>) = updateStates(ids) { it.copy(positionMs = 0) }
+
+    suspend fun unsubscribeMany(subIds: Collection<String>) = subIds.forEach { unsubscribe(it) }
+
+    suspend fun markSubscriptionsWatched(subIds: Collection<String>) = subIds.forEach { markAllWatched(it) }
+
+    suspend fun updateSubscriptions(subIds: Collection<String>, change: (SubscriptionEntity) -> SubscriptionEntity) {
+        subIds.forEach { id -> db.subscriptions().get(id)?.let { updateSubscription(change(it)) } }
+    }
+
     suspend fun markListWatched(items: List<EpisodeItem>, watched: Boolean) =
         setWatched(items.filter { it.watched != watched }.map { it.episode.id }, watched)
 

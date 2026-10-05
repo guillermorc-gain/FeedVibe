@@ -30,6 +30,8 @@ fun ScreenScaffold(
     actions: @Composable RowScope.() -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
     titleContent: (@Composable () -> Unit)? = null,
+    /** Si no es null sustituye a la barra superior (p. ej. la barra de selección múltiple). */
+    topBarOverride: (@Composable () -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
@@ -39,16 +41,20 @@ fun ScreenScaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = floatingActionButton,
         topBar = {
-            TopAppBar(
-                title = { if (titleContent != null) titleContent() else Text(title, fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    if (onBack != null) {
-                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás") }
-                    }
-                },
-                actions = actions,
-                scrollBehavior = scrollBehavior,
-            )
+            if (topBarOverride != null) {
+                topBarOverride()
+            } else {
+                TopAppBar(
+                    title = { if (titleContent != null) titleContent() else Text(title, fontWeight = FontWeight.Bold) },
+                    navigationIcon = {
+                        if (onBack != null) {
+                            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás") }
+                        }
+                    },
+                    actions = actions,
+                    scrollBehavior = scrollBehavior,
+                )
+            }
         },
         content = content,
     )

@@ -151,8 +151,20 @@ fun EpisodeRow(
     style: ListStyle,
     callbacks: EpisodeCallbacks,
     showChannel: Boolean = true,
+    selection: SelectionState? = null,
 ) {
     val current by rememberUpdatedState(item)
+    val selecting = selection?.active == true
+    val selected = selection?.isSelected(item.episode.id) == true
+    // Pulsación larga: empieza a seleccionar (o selecciona un rango si ya estás seleccionando).
+    val onClick: () -> Unit = {
+        if (selecting) selection?.toggle(item.episode.id) else callbacks.onOpen(item)
+    }
+    val onLongClick: () -> Unit = {
+        if (selection == null) callbacks.onToggleWatched(item)
+        else if (selecting) selection.selectRangeTo(item.episode.id)
+        else selection.toggle(item.episode.id)
+    }
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             if (value != SwipeToDismissBoxValue.Settled) {
@@ -162,7 +174,13 @@ fun EpisodeRow(
             false // la fila no desaparece: solo cambia su estado
         },
     )
-    SwipeToDismissBox(
+    if (selecting) {
+        // En modo selección no se desliza: solo se marca/desmarca.
+        when (style) {
+            ListStyle.CARDS -> EpisodeCard(item, callbacks, showChannel, selected, onClick, onLongClick)
+            ListStyle.COMPACT -> EpisodeCompact(item, callbacks, showChannel, selected, onClick, onLongClick)
+        }
+    } else SwipeToDismissBox(
         state = dismissState,
         backgroundContent = {
             val toEnd = dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd
@@ -191,14 +209,14 @@ fun EpisodeRow(
         },
     ) {
         when (style) {
-            ListStyle.CARDS -> EpisodeCard(item, callbacks, showChannel)
-            ListStyle.COMPACT -> EpisodeCompact(item, callbacks, showChannel)
+            ListStyle.CARDS -> EpisodeCard(item, callbacks, showChannel, false, onClick, onLongClick)
+            ListStyle.COMPACT -> EpisodeCompact(item, callbacks, showChannel, false, onClick, onLongClick)
         }
     }
 }
 
 @Composable
-private fun Thumbnail(item: EpisodeItem, modifier: Modifier) {
+private fun Thumbnail(item: EpisodeItem, modifier: Modifier, selected: Boolean = false) {
     Box(modifier.clip(MaterialTheme.shapes.small).background(MaterialTheme.colorScheme.surfaceVariant)) {
         AsyncImage(
             model = item.episode.thumbnailUrl ?: item.channelImage,
@@ -230,6 +248,14 @@ private fun Thumbnail(item: EpisodeItem, modifier: Modifier) {
                 progress = { (item.positionMs / 1000f / item.episode.durationSec).coerceIn(0f, 1f) },
                 modifier = Modifier.fillMaxWidth().height(3.dp).align(Alignment.BottomCenter),
             )
+        }
+        if (selected) {
+            Box(
+                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.CheckCircle, "Seleccionado", tint = Color.White, modifier = Modifier.size(36.dp))
+            }
         }
     }
 }
@@ -269,18 +295,25 @@ private fun EpisodeMenu(item: EpisodeItem, callbacks: EpisodeCallbacks) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EpisodeCard(item: EpisodeItem, callbacks: EpisodeCallbacks, showChannel: Boolean) {
+private fun EpisodeCard(
+    item: EpisodeItem,
+    callbacks: EpisodeCallbacks,
+    showChannel: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 5.dp)
             .clip(MaterialTheme.shapes.medium)
-            .combinedClickable(onClick = { callbacks.onOpen(item) }, onLongClick = { callbacks.onToggleWatched(item) }),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Column {
-            Thumbnail(item, Modifier.fillMaxWidth().aspectRatio(16f / 9f).padding(8.dp))
+            Thumbnail(item, Modifier.fillMaxWidth().aspectRatio(16f / 9f).padding(8.dp), selected)
             Row(Modifier.padding(start = 12.dp, bottom = 6.dp), verticalAlignment = Alignment.Top) {
                 if (showChannel) {
                     ChannelAvatar(item.channelImage, item.channelTitle, 36.dp, Modifier.padding(top = 2.dp))
@@ -324,16 +357,23 @@ private fun MetaLine(item: EpisodeItem, showChannel: Boolean) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EpisodeCompact(item: EpisodeItem, callbacks: EpisodeCallbacks, showChannel: Boolean) {
+private fun EpisodeCompact(
+    item: EpisodeItem,
+    callbacks: EpisodeCallbacks,
+    showChannel: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .combinedClickable(onClick = { callbacks.onOpen(item) }, onLongClick = { callbacks.onToggleWatched(item) })
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Thumbnail(item, Modifier.width(128.dp).aspectRatio(16f / 9f))
+        Thumbnail(item, Modifier.width(128.dp).aspectRatio(16f / 9f), selected)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f).alpha(if (item.watched) 0.6f else 1f)) {
             Text(

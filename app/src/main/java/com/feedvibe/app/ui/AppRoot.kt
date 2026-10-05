@@ -135,7 +135,7 @@ fun AppRoot(settings: AppSettings, external: ExternalRequest?, onExternalHandled
     ) { padding ->
         NavHost(nav, startDestination = Routes.FEED, modifier = Modifier.padding(bottom = padding.calculateBottomPadding())) {
             composable(Routes.FEED) { FeedScreen(nav, settings) }
-            composable(Routes.CHANNELS) { ChannelsScreen(nav) }
+            composable(Routes.CHANNELS) { ChannelsScreen(nav, settings) }
             composable(Routes.LIBRARY) { LibraryScreen(nav, settings) }
             composable(Routes.PROFILE) { ProfileScreen(nav, settings) }
             composable(Routes.CHANNEL, arguments = listOf(navArgument("id") { type = NavType.StringType })) {

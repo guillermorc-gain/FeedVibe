@@ -74,6 +74,12 @@ data class AppSettings(
     val nickname: String = "",
     /** Clave de la API de YouTube Data v3 (para cargar el historial completo de un canal). */
     val youtubeApiKey: String = "",
+    /** Orden de la pantalla de canales (nombre de [ChannelSort]). */
+    val channelSort: String = "NAME",
+    /** Tamaño de los logos en la cuadrícula de canales, en dp (como el zoom de Podcast Addict). */
+    val channelGridSize: Int = 104,
+    val channelGrid: Boolean = true,
+    val showChannelNames: Boolean = true,
 )
 
 class SettingsRepository(private val context: Context) {
@@ -97,6 +103,10 @@ class SettingsRepository(private val context: Context) {
         val autoUpdate = booleanPreferencesKey("auto_update")
         val nickname = stringPreferencesKey("nickname")
         val youtubeApiKey = stringPreferencesKey("youtube_api_key")
+        val channelSort = stringPreferencesKey("channel_sort")
+        val channelGridSize = intPreferencesKey("channel_grid_size")
+        val channelGrid = booleanPreferencesKey("channel_grid")
+        val showChannelNames = booleanPreferencesKey("show_channel_names")
 
         val lastRefresh = longPreferencesKey("last_refresh")
         val lastBackup = longPreferencesKey("last_backup")
@@ -132,6 +142,10 @@ class SettingsRepository(private val context: Context) {
             autoUpdateCheck = p[K.autoUpdate] ?: d.autoUpdateCheck,
             nickname = p[K.nickname] ?: d.nickname,
             youtubeApiKey = p[K.youtubeApiKey] ?: d.youtubeApiKey,
+            channelSort = p[K.channelSort] ?: d.channelSort,
+            channelGridSize = p[K.channelGridSize] ?: d.channelGridSize,
+            channelGrid = p[K.channelGrid] ?: d.channelGrid,
+            showChannelNames = p[K.showChannelNames] ?: d.showChannelNames,
         )
     }
 
@@ -161,6 +175,10 @@ class SettingsRepository(private val context: Context) {
             p[K.autoUpdate] = n.autoUpdateCheck
             p[K.nickname] = n.nickname
             p[K.youtubeApiKey] = n.youtubeApiKey
+            p[K.channelSort] = n.channelSort
+            p[K.channelGridSize] = n.channelGridSize
+            p[K.channelGrid] = n.channelGrid
+            p[K.showChannelNames] = n.showChannelNames
         }
     }
 

@@ -28,6 +28,8 @@ import com.feedvibe.app.data.prefs.AppSettings
 import com.feedvibe.app.ui.LocalContainer
 import com.feedvibe.app.ui.components.EmptyState
 import com.feedvibe.app.ui.components.EpisodeRow
+import com.feedvibe.app.ui.components.EpisodeSelectionBar
+import com.feedvibe.app.ui.components.rememberSelectionState
 import com.feedvibe.app.ui.components.ScreenScaffold
 
 @Composable
@@ -53,13 +55,22 @@ fun LibraryScreen(nav: NavController, settings: AppSettings) {
         "Aquí verás lo último que has marcado como visto.",
     )
 
-    ScreenScaffold(title = "Biblioteca") { padding ->
+    val selection = rememberSelectionState()
+    val current = tabs[tab].third
+    selection.order = current.map { it.episode.id }
+
+    ScreenScaffold(
+        title = "Biblioteca",
+        topBarOverride = if (selection.active) {
+            { EpisodeSelectionBar(selection, current) }
+        } else null,
+    ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             TabRow(selectedTabIndex = tab) {
                 tabs.forEachIndexed { i, (label, icon, list) ->
                     Tab(
                         selected = tab == i,
-                        onClick = { tab = i },
+                        onClick = { tab = i; selection.clear() },
                         text = { Text(if (list.isEmpty()) label else "$label (${list.size})", maxLines = 1) },
                         icon = { Icon(icon, null) },
                     )
@@ -68,7 +79,7 @@ fun LibraryScreen(nav: NavController, settings: AppSettings) {
             val (_, icon, list) = tabs[tab]
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
                 if (list.isEmpty()) item { EmptyState(icon, "Nada por aquí", empty[tab]) }
-                items(list, key = { it.episode.id }) { EpisodeRow(it, settings.listStyle, callbacks) }
+                items(list, key = { it.episode.id }) { EpisodeRow(it, settings.listStyle, callbacks, selection = selection) }
             }
         }
     }

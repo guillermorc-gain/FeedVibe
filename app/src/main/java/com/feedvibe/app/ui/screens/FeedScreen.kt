@@ -54,7 +54,12 @@ import androidx.navigation.NavController
 import com.feedvibe.app.data.prefs.AppSettings
 import com.feedvibe.app.ui.LocalContainer
 import com.feedvibe.app.ui.Routes
+import androidx.compose.foundation.text.KeyboardActions
+import com.feedvibe.app.ui.components.AddFromSearchCard
 import com.feedvibe.app.ui.components.EmptyState
+import com.feedvibe.app.ui.components.EpisodeSelectionBar
+import com.feedvibe.app.ui.components.looksLikeChannelAddress
+import com.feedvibe.app.ui.components.rememberSelectionState
 import com.feedvibe.app.ui.components.EpisodeRow
 import com.feedvibe.app.ui.components.ScreenScaffold
 import com.feedvibe.app.ui.relativeTime
@@ -91,6 +96,9 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
         }
     }
     val callbacks = rememberEpisodeCallbacks(nav)
+    val selection = rememberSelectionState()
+    selection.order = visible.map { it.episode.id }
+    val isAddress = looksLikeChannelAddress(query)
 
     fun refresh() = scope.launch {
         val r = feeds.refreshAll()
@@ -105,14 +113,20 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
     ScreenScaffold(
         title = "Novedades",
         snackbar = snackbar,
+        topBarOverride = if (selection.active) {
+            { EpisodeSelectionBar(selection, visible) }
+        } else null,
         titleContent = if (searching) {
             {
                 TextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("Buscar episodios o canales") },
+                    placeholder = { Text("Buscar o pegar la dirección de un canal") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        if (isAddress) { nav.navigate(Routes.add(query.trim())); query = ""; searching = false }
+                    }),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
                         unfocusedContainerColor = Color.Transparent,
@@ -146,7 +160,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
             }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
+            if (!selection.active) ExtendedFloatingActionButton(
                 onClick = { nav.navigate(Routes.add()) },
                 icon = { Icon(Icons.Filled.Add, null) },
                 text = { Text("Añadir") },
@@ -159,6 +173,15 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
             modifier = Modifier.fillMaxSize().padding(padding),
         ) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
+                if (isAddress) {
+                    item {
+                        AddFromSearchCard(query) {
+                            nav.navigate(Routes.add(query.trim()))
+                            query = ""
+                            searching = false
+                        }
+                    }
+                }
                 item {
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
@@ -196,7 +219,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
-                if (visible.isEmpty()) {
+                if (visible.isEmpty() && !isAddress) {
                     item {
                         if (subs.isEmpty()) {
                             EmptyState(
@@ -210,7 +233,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                     }
                 }
                 items(visible, key = { it.episode.id }) { item ->
-                    EpisodeRow(item, settings.listStyle, callbacks)
+                    EpisodeRow(item, settings.listStyle, callbacks, selection = selection)
                 }
             }
         }
