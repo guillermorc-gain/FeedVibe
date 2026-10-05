@@ -21,6 +21,7 @@ data class BackupSubscription(
     val siteUrl: String? = null,
     val category: String? = null,
     val notify: Boolean = true,
+    val fullHistory: Boolean = false,
 )
 
 @Serializable
@@ -54,7 +55,7 @@ class BackupManager(
         val file = BackupFile(
             createdAt = System.currentTimeMillis(),
             subscriptions = repo.allSubscriptions().map {
-                BackupSubscription(it.type.name, it.sourceKey, it.title, it.imageUrl, it.siteUrl, it.category, it.notify)
+                BackupSubscription(it.type.name, it.sourceKey, it.title, it.imageUrl, it.siteUrl, it.category, it.notify, it.fullHistory)
             },
             states = repo.allStates().map {
                 BackupState(it.episodeId, it.subscriptionId, it.watched, it.watchLater, it.favorite, it.positionMs, it.watchedAt, it.updatedAt)
@@ -69,7 +70,7 @@ class BackupManager(
     suspend fun restoreJson(json: String, restoreSettings: Boolean = true): RestoreSummary {
         val file = AppJson.decodeFromString(BackupFile.serializer(), json)
         file.subscriptions.forEach {
-            repo.importSubscription(SourceType.fromName(it.type), it.sourceKey, it.title, it.imageUrl, it.siteUrl, it.category, it.notify)
+            repo.importSubscription(SourceType.fromName(it.type), it.sourceKey, it.title, it.imageUrl, it.siteUrl, it.category, it.notify, it.fullHistory)
         }
         repo.restoreStates(file.states.map {
             EpisodeStateEntity(it.episodeId, it.subscriptionId, it.watched, it.watchLater, it.favorite, it.positionMs, it.watchedAt, it.updatedAt)
@@ -129,7 +130,7 @@ class BackupManager(
                 val yt = Regex("channel_id=(UC[\\w-]{22})").find(url)?.groupValues?.get(1)
                 if (yt != null) SourceType.YOUTUBE to "channel:$yt" else SourceType.RSS to url
             }
-            repo.importSubscription(type, key, title, null, o.attr("htmlUrl"), cat, true)
+            repo.importSubscription(type, key, title, null, o.attr("htmlUrl"), cat, true, false)
             count++
         }
         return count

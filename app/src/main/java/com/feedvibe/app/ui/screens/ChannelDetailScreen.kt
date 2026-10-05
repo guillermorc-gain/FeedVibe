@@ -1,5 +1,13 @@
 package com.feedvibe.app.ui.screens
 
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Surface
+import com.feedvibe.app.data.repo.MissingApiKeyException
+import com.feedvibe.app.ui.Routes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,6 +69,7 @@ import com.feedvibe.app.ui.openUrl
 import com.feedvibe.app.ui.relativeTime
 import com.feedvibe.app.ui.shareText
 import com.feedvibe.app.data.sources.RssSource
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,6 +87,10 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var editCategory by remember { mutableStateOf(false) }
+    var askFullHistory by remember { mutableStateOf(false) }
+    var missingKey by remember { mutableStateOf(false) }
+    val historyProgress by feeds.historyProgress.collectAsStateWithLifecycle()
+    val loadingHistory = historyProgress[subId]
     val callbacks = rememberEpisodeCallbacks(nav, allowOpenChannel = false)
     val s = sub
 
@@ -101,6 +114,13 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
                             leadingIcon = { Icon(Icons.Filled.DoneAll, null) },
                             onClick = { menu = false; container.appScope.launch { feeds.markAllWatched(subId) } },
                         )
+                        if (feeds.canLoadFullHistory(s)) {
+                            DropdownMenuItem(
+                                text = { Text(if (s.fullHistory) "Volver a cargar todos los vídeos" else "Cargar todos los vídeos") },
+                                leadingIcon = { Icon(Icons.Filled.History, null) },
+                                onClick = { menu = false; askFullHistory = true },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Categoría") },
                             leadingIcon = { Icon(Icons.Filled.Edit, null) },
@@ -175,6 +195,14 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
                                     IconButton(onClick = { scope.launch { feeds.refreshOne(subId) } }) { Icon(Icons.Filled.Refresh, "Reintentar") }
                                 }
                             }
+                            if (feeds.canLoadFullHistory(s) && (!s.fullHistory || loadingHistory != null)) {
+                                Spacer(Modifier.height(12.dp))
+                                FullHistoryCard(
+                                    shown = episodes.size,
+                                    progress = loadingHistory,
+                                    onLoad = { askFullHistory = true },
+                                )
+                            }
                             Spacer(Modifier.height(8.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 FilterChip(selected = !onlyUnwatched, onClick = { onlyUnwatched = false }, label = { Text("Todos") })
@@ -206,6 +234,58 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
         )
     }
 
+    if (askFullHistory) {
+        var markOld by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { askFullHistory = false },
+            title = { Text("Cargar todos los vídeos") },
+            text = {
+                Column {
+                    Text("Se descargará la lista completa de vídeos del canal desde YouTube. En canales muy grandes puede tardar un poco.")
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { markOld = !markOld }) {
+                        Checkbox(checked = markOld, onCheckedChange = { markOld = it })
+                        Text("Marcar como vistos los vídeos antiguos que se añadan")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    askFullHistory = false
+                    // En appScope para que la carga siga aunque salgas de la pantalla.
+                    container.appScope.launch(Dispatchers.Main) {
+                        try {
+                            val n = feeds.loadFullHistory(subId, markOld)
+                            snackbar.showSnackbar(if (n == 0) "No había vídeos nuevos" else "Añadidos $n vídeos")
+                        } catch (e: MissingApiKeyException) {
+                            missingKey = true
+                        } catch (e: Exception) {
+                            snackbar.showSnackbar(e.message ?: "No se pudo cargar el historial")
+                        }
+                    }
+                }) { Text("Cargar") }
+            },
+            dismissButton = { TextButton(onClick = { askFullHistory = false }) { Text("Cancelar") } },
+        )
+    }
+
+    if (missingKey) {
+        AlertDialog(
+            onDismissRequest = { missingKey = false },
+            title = { Text("Falta la clave de YouTube") },
+            text = {
+                Text(
+                    "El RSS de YouTube solo da los 15 últimos vídeos. Para ver todos hace falta una clave gratuita " +
+                        "de la API de YouTube. Añádela en Perfil → Reproducción → YouTube (allí se explica cómo conseguirla)."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { missingKey = false; nav.navigate(Routes.PLAYBACK) }) { Text("Configurar") }
+            },
+            dismissButton = { TextButton(onClick = { missingKey = false }) { Text("Ahora no") } },
+        )
+    }
+
     if (editCategory && s != null) {
         var text by remember { mutableStateOf(s.category.orEmpty()) }
         AlertDialog(
@@ -222,5 +302,34 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
             },
             dismissButton = { TextButton(onClick = { editCategory = false }) { Text("Cancelar") } },
         )
+    }
+}
+
+@Composable
+private fun FullHistoryCard(shown: Int, progress: Int?, onLoad: () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.History, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                if (progress != null) {
+                    Text("Cargando historial…", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text("$progress vídeos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                } else {
+                    Text("Mostrando los últimos $shown vídeos", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text("Carga el canal entero para ver todo lo que te falta", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+            if (progress == null) {
+                Spacer(Modifier.width(8.dp))
+                FilledTonalButton(onClick = onLoad) { Text("Cargar todos") }
+            }
+        }
     }
 }

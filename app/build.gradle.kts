@@ -38,6 +38,14 @@ android {
 
         // Repositorio de GitHub del que se descargan las actualizaciones (Releases).
         buildConfigField("String", "UPDATE_REPO", "\"guillermorc-gain/FeedVibe\"")
+        // Clave opcional de YouTube Data API v3 (secreto YOUTUBE_API_KEY en CI o en local.properties).
+        // También se puede escribir desde la app: Perfil → Reproducción → YouTube.
+        val localProps = Properties().apply {
+            val f = rootProject.file("local.properties")
+            if (f.exists()) f.inputStream().use { load(it) }
+        }
+        val ytKey = localProps.getProperty("youtubeApiKey") ?: System.getenv("YOUTUBE_API_KEY") ?: ""
+        buildConfigField("String", "YOUTUBE_API_KEY", "\"$ytKey\"")
         vectorDrawables { useSupportLibrary = true }
     }
 

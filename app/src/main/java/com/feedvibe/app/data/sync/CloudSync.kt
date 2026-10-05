@@ -49,6 +49,8 @@ class CloudSync(
 
     /** Llamado cuando llega una suscripción nueva desde otro dispositivo. */
     var onRemoteSubscriptionAdded: ((SubscriptionEntity) -> Unit)? = null
+    /** Otro dispositivo cargó el historial completo de un canal: hay que cargarlo aquí también. */
+    var onRemoteFullHistory: ((SubscriptionEntity) -> Unit)? = null
     var onRemoteProfile: ((nickname: String?, photoBase64: String?, photoUpdatedAt: Long) -> Unit)? = null
 
     private fun userDoc(u: String) = firestore!!.collection("users").document(u)
@@ -148,6 +150,7 @@ class CloudSync(
                 siteUrl = d.getString("siteUrl"),
                 category = d.getString("category"),
                 notify = d.getBoolean("notify") ?: true,
+                fullHistory = d.getBoolean("fullHistory") ?: false,
                 addedAt = d.getLong("addedAt") ?: System.currentTimeMillis(),
                 lastRefreshed = local?.lastRefreshed ?: 0,
                 lastError = local?.lastError,
@@ -155,6 +158,7 @@ class CloudSync(
             )
             db.subscriptions().upsert(sub)
             if (local == null) onRemoteSubscriptionAdded?.invoke(sub)
+            if (sub.fullHistory && local?.fullHistory != true) onRemoteFullHistory?.invoke(sub)
         }
     }
 
@@ -188,6 +192,7 @@ class CloudSync(
         "siteUrl" to s.siteUrl,
         "category" to s.category,
         "notify" to s.notify,
+        "fullHistory" to s.fullHistory,
         "addedAt" to s.addedAt,
         "updatedAt" to s.updatedAt,
         "deleted" to false,

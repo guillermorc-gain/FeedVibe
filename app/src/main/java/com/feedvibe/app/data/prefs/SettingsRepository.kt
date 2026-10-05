@@ -72,6 +72,8 @@ data class AppSettings(
     val backupKeep: Int = 10,
     val autoUpdateCheck: Boolean = true,
     val nickname: String = "",
+    /** Clave de la API de YouTube Data v3 (para cargar el historial completo de un canal). */
+    val youtubeApiKey: String = "",
 )
 
 class SettingsRepository(private val context: Context) {
@@ -94,6 +96,7 @@ class SettingsRepository(private val context: Context) {
         val backupKeep = intPreferencesKey("backup_keep")
         val autoUpdate = booleanPreferencesKey("auto_update")
         val nickname = stringPreferencesKey("nickname")
+        val youtubeApiKey = stringPreferencesKey("youtube_api_key")
 
         val lastRefresh = longPreferencesKey("last_refresh")
         val lastBackup = longPreferencesKey("last_backup")
@@ -128,6 +131,7 @@ class SettingsRepository(private val context: Context) {
             backupKeep = p[K.backupKeep] ?: d.backupKeep,
             autoUpdateCheck = p[K.autoUpdate] ?: d.autoUpdateCheck,
             nickname = p[K.nickname] ?: d.nickname,
+            youtubeApiKey = p[K.youtubeApiKey] ?: d.youtubeApiKey,
         )
     }
 
@@ -156,6 +160,7 @@ class SettingsRepository(private val context: Context) {
             p[K.backupKeep] = n.backupKeep
             p[K.autoUpdate] = n.autoUpdateCheck
             p[K.nickname] = n.nickname
+            p[K.youtubeApiKey] = n.youtubeApiKey
         }
     }
 

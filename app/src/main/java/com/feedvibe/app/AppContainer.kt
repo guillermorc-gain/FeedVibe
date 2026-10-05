@@ -39,6 +39,9 @@ class AppContainer(val context: Context) {
         cloud.onRemoteSubscriptionAdded = { sub ->
             appScope.launch { runCatching { feeds.refreshOne(sub.id) } }
         }
+        cloud.onRemoteFullHistory = { sub ->
+            appScope.launch { runCatching { feeds.loadFullHistory(sub.id, markOldWatched = false) } }
+        }
         cloud.onRemoteProfile = { nick, photo, stamp ->
             appScope.launch { profile.applyRemote(nick, photo, stamp) }
         }

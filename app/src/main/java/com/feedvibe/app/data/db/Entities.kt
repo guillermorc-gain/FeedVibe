@@ -20,6 +20,8 @@ data class SubscriptionEntity(
     val siteUrl: String? = null,
     val category: String? = null,
     val notify: Boolean = true,
+    /** Se ha cargado (o se debe cargar) el historial completo del canal, no solo los últimos del RSS. */
+    val fullHistory: Boolean = false,
     val addedAt: Long = System.currentTimeMillis(),
     val lastRefreshed: Long = 0,
     val lastError: String? = null,

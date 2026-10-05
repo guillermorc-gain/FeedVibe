@@ -32,7 +32,21 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import com.feedvibe.app.BuildConfig
+import com.feedvibe.app.data.sources.YouTubeApi
+import com.feedvibe.app.ui.openUrl
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -360,6 +374,88 @@ fun PlaybackScreen(nav: NavController, settings: AppSettings) {
             SwitchRow("Ocultar Shorts y directos de YouTube", "Solo vídeos normales (se aplica en la próxima actualización)", settings.hideShorts) {
                 update { s -> s.copy(hideShorts = it) }
             }
+        }
+        YouTubeKeySection(settings)
+    }
+}
+
+/** Clave de la API de YouTube: permite listar todos los vídeos de un canal, no solo los 15 últimos. */
+@Composable
+private fun YouTubeKeySection(settings: AppSettings) {
+    val container = LocalContainer.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var key by remember(settings.youtubeApiKey) { mutableStateOf(settings.youtubeApiKey) }
+    var visible by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    val builtIn = BuildConfig.YOUTUBE_API_KEY.isNotBlank()
+
+    SectionTitle("YouTube: todos los vídeos del canal")
+    SettingsGroup {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                "YouTube solo publica los 15 últimos vídeos de cada canal en su RSS. Con una clave gratuita de la " +
+                    "API de YouTube, FeedVibe puede cargar el canal entero (botón «Cargar todos» en cada canal).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (builtIn && settings.youtubeApiKey.isBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text("✔ Esta versión ya incluye una clave. Puedes poner la tuya si quieres.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            }
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = key,
+                onValueChange = { key = it.trim(); status = null },
+                label = { Text("Clave de la API de YouTube") },
+                placeholder = { Text("AIza…") },
+                singleLine = true,
+                visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { visible = !visible }) {
+                        Icon(if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, "Mostrar")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            status?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, style = MaterialTheme.typography.bodySmall, color = if (it.startsWith("✔")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    enabled = !checking,
+                    onClick = {
+                        checking = true
+                        scope.launch {
+                            if (key.isBlank()) {
+                                container.settings.update { it.copy(youtubeApiKey = "") }
+                                status = "Clave eliminada"
+                            } else {
+                                status = runCatching { YouTubeApi.validateKey(key) }
+                                    .fold({ "✔ Clave válida y guardada" }, { it.message ?: "Clave no válida" })
+                                if (status?.startsWith("✔") == true) container.settings.update { it.copy(youtubeApiKey = key) }
+                            }
+                            checking = false
+                        }
+                    },
+                ) { Text(if (checking) "Comprobando…" else "Guardar") }
+                OutlinedButton(onClick = {
+                    openUrl(context, "https://console.cloud.google.com/apis/library/youtube.googleapis.com", settings.openMode)
+                }) { Text("Conseguir clave") }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Cómo conseguirla (2 minutos, gratis):\n" +
+                    "1. Abre «Conseguir clave» y habilita «YouTube Data API v3» (sirve el mismo proyecto de Firebase).\n" +
+                    "2. Ve a Credenciales → Crear credenciales → Clave de API.\n" +
+                    "3. Copia la clave (empieza por AIza) y pégala aquí.\n" +
+                    "Cuota gratuita: 10.000 unidades al día; cargar 1.000 vídeos gasta unas 40.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

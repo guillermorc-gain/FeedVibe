@@ -63,6 +63,8 @@ jobs:
           fi
 
       - name: Compilar APK
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: ./gradlew --no-daemon assembleRelease
 
       - name: Renombrar APK

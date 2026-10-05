@@ -6,7 +6,11 @@ import com.feedvibe.app.data.db.EpisodeItem
 import com.feedvibe.app.data.db.EpisodeStateEntity
 import com.feedvibe.app.data.db.SubscriptionEntity
 import com.feedvibe.app.data.prefs.SettingsRepository
+import com.feedvibe.app.BuildConfig
+import com.feedvibe.app.data.sources.ParsedEpisode
 import com.feedvibe.app.data.sources.ParsedFeed
+import com.feedvibe.app.data.sources.SourceException
+import com.feedvibe.app.data.sources.YouTubeApi
 import com.feedvibe.app.data.sources.SourceResolver
 import com.feedvibe.app.data.sources.SourceType
 import com.feedvibe.app.data.sync.CloudSync
@@ -17,6 +21,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -28,6 +33,9 @@ data class NewEpisodes(val subscription: SubscriptionEntity, val episodes: List<
 
 data class RefreshResult(val newEpisodes: List<NewEpisodes>, val errors: Int)
 
+/** No hay clave de la API de YouTube configurada. */
+class MissingApiKeyException : Exception("Falta la clave de la API de YouTube")
+
 class FeedRepository(
     private val db: AppDatabase,
     private val settings: SettingsRepository,
@@ -36,6 +44,10 @@ class FeedRepository(
     private val refreshMutex = Mutex()
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
+    /** Canales cargando su historial completo -> vídeos cargados hasta ahora. */
+    private val _historyProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val historyProgress: StateFlow<Map<String, Int>> = _historyProgress.asStateFlow()
 
     // ---------- Lectura ----------
     val subscriptionsWithCounts = db.subscriptions().observeWithCounts()
@@ -101,12 +113,12 @@ class FeedRepository(
     }
 
     /** Usado al restaurar copias de seguridad / importar OPML. */
-    suspend fun importSubscription(type: SourceType, key: String, title: String, imageUrl: String?, siteUrl: String?, category: String?, notify: Boolean) {
+    suspend fun importSubscription(type: SourceType, key: String, title: String, imageUrl: String?, siteUrl: String?, category: String?, notify: Boolean, fullHistory: Boolean) {
         val id = Ids.subscription(type, key)
         if (db.subscriptions().get(id) != null) return
         val sub = SubscriptionEntity(
             id = id, type = type, sourceKey = key, title = title, imageUrl = imageUrl,
-            siteUrl = siteUrl, category = category, notify = notify,
+            siteUrl = siteUrl, category = category, notify = notify, fullHistory = fullHistory,
         )
         db.subscriptions().upsert(sub)
         cloud.pushSubscription(sub)
@@ -115,7 +127,10 @@ class FeedRepository(
     // ---------- Actualización de feeds ----------
 
     private fun toEntities(sub: SubscriptionEntity, feed: ParsedFeed): List<EpisodeEntity> =
-        feed.episodes.map { e ->
+        toEntities(sub, feed.episodes)
+
+    private fun toEntities(sub: SubscriptionEntity, episodes: List<ParsedEpisode>): List<EpisodeEntity> =
+        episodes.map { e ->
             EpisodeEntity(
                 id = Ids.episode(sub.id, e.guid),
                 subscriptionId = sub.id,
@@ -150,6 +165,10 @@ class FeedRepository(
                 lastError = null,
             )
             db.subscriptions().upsert(updatedSub)
+            // Canal con historial completo que este dispositivo aún no tiene (restaurado, otro móvil…).
+            if (sub.fullHistory && existing.isEmpty()) {
+                runCatching { loadFullHistory(sub.id, markOldWatched = false) }
+            }
             if (firstRefresh || newOnes.isEmpty()) null else NewEpisodes(updatedSub, newOnes)
         } catch (e: Exception) {
             db.subscriptions().setRefreshResult(sub.id, sub.lastRefreshed, e.message ?: "Error")
@@ -191,6 +210,49 @@ class FeedRepository(
     }
 
     suspend fun refreshOne(subId: String) = refreshAll(setOf(subId))
+
+    // ---------- Historial completo (YouTube Data API) ----------
+
+    /** Clave configurada en la app o, si no hay, la incluida al compilar. */
+    suspend fun youtubeApiKey(): String =
+        settings.current().youtubeApiKey.trim().ifBlank { BuildConfig.YOUTUBE_API_KEY }
+
+    fun canLoadFullHistory(sub: SubscriptionEntity) = sub.type == SourceType.YOUTUBE
+
+    /**
+     * Carga todos los vídeos del canal (no solo los 15 del RSS).
+     * @param markOldWatched marca como vistos los vídeos que no se conocían.
+     * @return número de vídeos nuevos añadidos.
+     */
+    suspend fun loadFullHistory(subId: String, markOldWatched: Boolean, onProgress: (Int) -> Unit = {}): Int =
+        withContext(Dispatchers.IO) {
+            val sub = db.subscriptions().get(subId) ?: throw SourceException("Canal no encontrado")
+            if (!canLoadFullHistory(sub)) throw SourceException("Esta plataforma ya muestra todos los episodios disponibles en su feed")
+            val apiKey = youtubeApiKey()
+            if (apiKey.isBlank()) throw MissingApiKeyException()
+            if (subId in _historyProgress.value) return@withContext 0
+            _historyProgress.update { it + (subId to 0) }
+            val episodes = try {
+                YouTubeApi.fetchAll(apiKey, sub.sourceKey, settings.current().hideShorts) { n ->
+                    _historyProgress.update { it + (subId to n) }
+                    onProgress(n)
+                }
+            } finally {
+                _historyProgress.update { it - subId }
+            }
+            val existing = db.episodes().idsForSubscription(sub.id).toHashSet()
+            val entities = toEntities(sub, episodes)
+            db.episodes().upsertAll(entities)
+            val newIds = entities.map { it.id }.filter { it !in existing }
+            if (markOldWatched) setWatched(newIds, true)
+            if (!sub.fullHistory) {
+                // Se sincroniza: el resto de dispositivos cargarán también el historial.
+                val updated = (db.subscriptions().get(sub.id) ?: sub).copy(fullHistory = true, updatedAt = System.currentTimeMillis())
+                db.subscriptions().upsert(updated)
+                cloud.pushSubscription(updated)
+            }
+            newIds.size
+        }
 
     // ---------- Estado de episodios ----------
 
