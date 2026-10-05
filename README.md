@@ -2,6 +2,8 @@
 
 # FeedVibe
 
+![Vista previa](docs/preview.png)
+
 App Android estilo **Podcast Addict** para seguir canales de vídeo y feeds: ves de un vistazo qué episodios
 no has visto, los marcas como vistos y todo se **sincroniza al instante entre tus dispositivos** con tu cuenta de Google.
 
