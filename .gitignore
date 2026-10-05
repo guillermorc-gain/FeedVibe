@@ -1,0 +1,17 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/app/build/
+/captures
+.externalNativeBuild
+.cxx
+*.keystore
+*.jks
+/app/google-services.json
+keystore.properties
+__pycache__/
+
+!/keystore/feedvibe-default.jks

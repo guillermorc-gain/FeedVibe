@@ -1,0 +1,87 @@
+name: Android
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publicar como Release (actualización para la app)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Configurar Firebase (secreto GOOGLE_SERVICES_JSON)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
+            echo "Firebase configurado"
+          else
+            echo "::warning::Sin GOOGLE_SERVICES_JSON: la app se compila sin inicio de sesión ni sincronización"
+          fi
+
+      - name: Configurar firma (secretos opcionales)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+            {
+              echo "SIGNING_STORE_FILE=release.jks"
+              echo "SIGNING_STORE_PASSWORD=$KEYSTORE_PASSWORD"
+              echo "SIGNING_KEY_ALIAS=$KEY_ALIAS"
+              echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Compilar APK
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Renombrar APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/FeedVibe-${VERSION_NAME}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FeedVibe-${{ env.VERSION_NAME }}
+          path: dist/*.apk
+
+      # Cada push a main publica una Release: la app la detecta y se actualiza sola.
+      - name: Publicar Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') || inputs.publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION_NAME }}
+          name: FeedVibe ${{ env.VERSION_NAME }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: dist/*.apk

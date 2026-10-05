@@ -1,0 +1,184 @@
+package com.feedvibe.app.data.prefs
+
+import android.content.Context
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
+
+private val Context.dataStore by preferencesDataStore("settings")
+
+enum class ThemeMode(val label: String) { SYSTEM("Sistema"), LIGHT("Claro"), DARK("Oscuro") }
+
+enum class OpenMode(val label: String) { EXTERNAL("App externa"), INTERNAL("Navegador integrado") }
+
+enum class ListStyle(val label: String) { CARDS("Tarjetas"), COMPACT("Compacta") }
+
+/** Colores de acento disponibles (como en el selector de apariencia de EMT Palma). */
+enum class AccentColor(val label: String, val argb: Long) {
+    BLUE("Azul", 0xFF0A7CF6),
+    RED("Rojo", 0xFFE53935),
+    ORANGE("Naranja", 0xFFF57C00),
+    GREEN("Verde", 0xFF2E7D32),
+    TEAL("Turquesa", 0xFF00897B),
+    PURPLE("Morado", 0xFF7E57C2),
+    PINK("Rosa", 0xFFD81B60),
+    BROWN("Marrón", 0xFF6D4C41),
+}
+
+/** Opciones de periodo de sincronización/actualización automática. */
+val SYNC_INTERVALS: List<Pair<Int, String>> = listOf(
+    0 to "Manual",
+    15 to "Cada 15 minutos",
+    30 to "Cada 30 minutos",
+    60 to "Cada hora",
+    120 to "Cada 2 horas",
+    360 to "Cada 6 horas",
+    720 to "Cada 12 horas",
+    1440 to "Una vez al día",
+)
+
+val BACKUP_INTERVALS: List<Pair<Int, String>> = listOf(
+    0 to "Desactivada",
+    1 to "Diaria",
+    7 to "Semanal",
+    30 to "Mensual",
+)
+
+@Serializable
+data class AppSettings(
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val dynamicColor: Boolean = false,
+    val accent: AccentColor = AccentColor.BLUE,
+    val amoled: Boolean = false,
+    val listStyle: ListStyle = ListStyle.CARDS,
+    val syncIntervalMin: Int = 60,
+    val wifiOnly: Boolean = false,
+    val refreshOnOpen: Boolean = true,
+    val notificationsEnabled: Boolean = true,
+    val notifyLive: Boolean = true,
+    val autoMarkOnOpen: Boolean = true,
+    val openMode: OpenMode = OpenMode.EXTERNAL,
+    val hideShorts: Boolean = false,
+    val hideWatched: Boolean = true,
+    val autoBackupDays: Int = 7,
+    val backupKeep: Int = 10,
+    val autoUpdateCheck: Boolean = true,
+    val nickname: String = "",
+)
+
+class SettingsRepository(private val context: Context) {
+    private object K {
+        val theme = stringPreferencesKey("theme")
+        val dynamic = booleanPreferencesKey("dynamic")
+        val accent = stringPreferencesKey("accent")
+        val amoled = booleanPreferencesKey("amoled")
+        val listStyle = stringPreferencesKey("list_style")
+        val syncInterval = intPreferencesKey("sync_interval")
+        val wifiOnly = booleanPreferencesKey("wifi_only")
+        val refreshOnOpen = booleanPreferencesKey("refresh_on_open")
+        val notifications = booleanPreferencesKey("notifications")
+        val notifyLive = booleanPreferencesKey("notify_live")
+        val autoMark = booleanPreferencesKey("auto_mark")
+        val openMode = stringPreferencesKey("open_mode")
+        val hideShorts = booleanPreferencesKey("hide_shorts")
+        val hideWatched = booleanPreferencesKey("hide_watched")
+        val autoBackup = intPreferencesKey("auto_backup_days")
+        val backupKeep = intPreferencesKey("backup_keep")
+        val autoUpdate = booleanPreferencesKey("auto_update")
+        val nickname = stringPreferencesKey("nickname")
+
+        val lastRefresh = longPreferencesKey("last_refresh")
+        val lastBackup = longPreferencesKey("last_backup")
+        val lastUpdateCheck = longPreferencesKey("last_update_check")
+        val stateCursor = longPreferencesKey("state_cursor")
+        val syncedUid = stringPreferencesKey("synced_uid")
+        val profilePhotoVersion = longPreferencesKey("profile_photo_version")
+        val onboardingDone = booleanPreferencesKey("onboarding_done")
+    }
+
+    private inline fun <reified E : Enum<E>> Preferences.enum(key: Preferences.Key<String>, default: E): E =
+        this[key]?.let { v -> enumValues<E>().firstOrNull { it.name == v } } ?: default
+
+    private fun read(p: Preferences): AppSettings {
+        val d = AppSettings()
+        return AppSettings(
+            themeMode = p.enum(K.theme, d.themeMode),
+            dynamicColor = p[K.dynamic] ?: d.dynamicColor,
+            accent = p.enum(K.accent, d.accent),
+            amoled = p[K.amoled] ?: d.amoled,
+            listStyle = p.enum(K.listStyle, d.listStyle),
+            syncIntervalMin = p[K.syncInterval] ?: d.syncIntervalMin,
+            wifiOnly = p[K.wifiOnly] ?: d.wifiOnly,
+            refreshOnOpen = p[K.refreshOnOpen] ?: d.refreshOnOpen,
+            notificationsEnabled = p[K.notifications] ?: d.notificationsEnabled,
+            notifyLive = p[K.notifyLive] ?: d.notifyLive,
+            autoMarkOnOpen = p[K.autoMark] ?: d.autoMarkOnOpen,
+            openMode = p.enum(K.openMode, d.openMode),
+            hideShorts = p[K.hideShorts] ?: d.hideShorts,
+            hideWatched = p[K.hideWatched] ?: d.hideWatched,
+            autoBackupDays = p[K.autoBackup] ?: d.autoBackupDays,
+            backupKeep = p[K.backupKeep] ?: d.backupKeep,
+            autoUpdateCheck = p[K.autoUpdate] ?: d.autoUpdateCheck,
+            nickname = p[K.nickname] ?: d.nickname,
+        )
+    }
+
+    val settings: Flow<AppSettings> = context.dataStore.data.map { read(it) }
+
+    suspend fun current(): AppSettings = settings.first()
+
+    suspend fun update(transform: (AppSettings) -> AppSettings) {
+        context.dataStore.edit { p ->
+            val n = transform(read(p))
+            p[K.theme] = n.themeMode.name
+            p[K.dynamic] = n.dynamicColor
+            p[K.accent] = n.accent.name
+            p[K.amoled] = n.amoled
+            p[K.listStyle] = n.listStyle.name
+            p[K.syncInterval] = n.syncIntervalMin
+            p[K.wifiOnly] = n.wifiOnly
+            p[K.refreshOnOpen] = n.refreshOnOpen
+            p[K.notifications] = n.notificationsEnabled
+            p[K.notifyLive] = n.notifyLive
+            p[K.autoMark] = n.autoMarkOnOpen
+            p[K.openMode] = n.openMode.name
+            p[K.hideShorts] = n.hideShorts
+            p[K.hideWatched] = n.hideWatched
+            p[K.autoBackup] = n.autoBackupDays
+            p[K.backupKeep] = n.backupKeep
+            p[K.autoUpdate] = n.autoUpdateCheck
+            p[K.nickname] = n.nickname
+        }
+    }
+
+    // ---- Valores internos ----
+    private fun longFlow(key: Preferences.Key<Long>): Flow<Long> = context.dataStore.data.map { it[key] ?: 0L }
+    private suspend fun setLong(key: Preferences.Key<Long>, v: Long) = context.dataStore.edit { it[key] = v }
+
+    val lastRefresh: Flow<Long> = longFlow(K.lastRefresh)
+    suspend fun setLastRefresh(v: Long) = setLong(K.lastRefresh, v)
+    val lastBackup: Flow<Long> = longFlow(K.lastBackup)
+    suspend fun setLastBackup(v: Long) = setLong(K.lastBackup, v)
+    suspend fun lastUpdateCheck(): Long = longFlow(K.lastUpdateCheck).first()
+    suspend fun setLastUpdateCheck(v: Long) = setLong(K.lastUpdateCheck, v)
+    suspend fun stateCursor(): Long = longFlow(K.stateCursor).first()
+    suspend fun setStateCursor(v: Long) = setLong(K.stateCursor, v)
+    val profilePhotoVersion: Flow<Long> = longFlow(K.profilePhotoVersion)
+    suspend fun bumpProfilePhoto() = setLong(K.profilePhotoVersion, System.currentTimeMillis())
+
+    suspend fun syncedUid(): String? = context.dataStore.data.first()[K.syncedUid]
+    suspend fun setSyncedUid(uid: String?) = context.dataStore.edit {
+        if (uid == null) it.remove(K.syncedUid) else it[K.syncedUid] = uid
+    }
+
+    val onboardingDone: Flow<Boolean> = context.dataStore.data.map { it[K.onboardingDone] ?: false }
+    suspend fun setOnboardingDone() = context.dataStore.edit { it[K.onboardingDone] = true }
+}
