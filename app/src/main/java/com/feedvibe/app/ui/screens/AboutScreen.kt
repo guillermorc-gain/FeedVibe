@@ -75,14 +75,6 @@ fun AboutScreen(nav: NavController, settings: AppSettings) {
             SwitchRow("Buscar actualizaciones automáticamente", "Cada vez que abres la app; se instalan sin salir de ella", settings.autoUpdateCheck) { on ->
                 scope.launch { container.settings.update { it.copy(autoUpdateCheck = on) } }
             }
-            ListItem(
-                headlineContent = { Text("Código fuente y versiones") },
-                supportingContent = { Text("github.com/${BuildConfig.UPDATE_REPO}") },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier.clickable {
-                    openUrl(context, "https://github.com/${BuildConfig.UPDATE_REPO}/releases", settings.openMode)
-                },
-            )
         }
     }
 }
