@@ -236,7 +236,7 @@ class FeedRepository(
                 }
                 // Con clave: API oficial (fechas exactas y duraciones). Sin clave: la página del canal.
                 if (apiKey.isNotBlank()) YouTubeApi.fetchAll(apiKey, sub.sourceKey, settings.current().hideShorts, onProgress = progress)
-                else YouTubePage.fetchAll(sub.sourceKey, onProgress = progress)
+                else YouTubePage.fetchAll(sub.sourceKey, settings.current().hideShorts, onProgress = progress)
             } finally {
                 _historyProgress.update { it - subId }
             }

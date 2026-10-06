@@ -27,8 +27,28 @@ object YouTubePage {
      * Todos los vídeos del canal sin clave de API: la página «Vídeos» carga más al hacer
      * scroll mediante "continuaciones"; aquí se piden una tras otra hasta llegar al primero.
      */
-    suspend fun fetchAll(key: String, limit: Int = 5000, onProgress: (Int) -> Unit): List<ParsedEpisode> =
-        fetchPages(key, limit, onProgress).episodes
+    suspend fun fetchAll(key: String, hideShorts: Boolean, limit: Int = 5000, onProgress: (Int) -> Unit): List<ParsedEpisode> {
+        if (!key.startsWith("channel:")) return fetchPages(key, limit, onProgress).episodes
+        // La pestaña «Vídeos» no incluye directos ni Shorts. La lista de subidas del canal (UU…)
+        // tiene todo, como en Podcast Addict. Sin Shorts: vídeos normales (UULF) + directos (UULV).
+        val base = key.substringAfter(':').removePrefix("UC")
+        val playlists = if (hideShorts) listOf("UULF$base", "UULV$base") else listOf("UU$base")
+        val all = LinkedHashMap<String, ParsedEpisode>()
+        var ok = false
+        for (pl in playlists) {
+            val loadedBefore = all.size
+            val result = runCatching {
+                fetchPages("playlist:$pl", limit) { n -> onProgress(loadedBefore + n) }.episodes
+            }
+            result.getOrNull()?.let { list ->
+                ok = true
+                list.forEach { all.putIfAbsent(it.guid, it) }
+            }
+        }
+        // Si la lista de subidas no se pudo leer, al menos la pestaña «Vídeos».
+        if (!ok || all.isEmpty()) return fetchPages(key, limit, onProgress).episodes
+        return all.values.sortedByDescending { it.publishedAt }
+    }
 
     private suspend fun fetchPages(key: String, limit: Int, onProgress: (Int) -> Unit): ParsedFeed {
         val (kind, id) = key.split(':', limit = 2).let { it[0] to it.getOrElse(1) { "" } }
