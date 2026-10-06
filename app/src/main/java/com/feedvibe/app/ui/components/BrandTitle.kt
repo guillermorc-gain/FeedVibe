@@ -1,6 +1,16 @@
 package com.feedvibe.app.ui.components
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
@@ -65,7 +75,37 @@ fun BrandTitle(modifier: Modifier = Modifier, fontSize: TextUnit = 26.sp, showIc
         offset = Offset(0f, 3f),
         blurRadius = 8f,
     )
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+    // Reflejo de luz que cruza el logotipo cada pocos segundos.
+    val shine by rememberInfiniteTransition(label = "brillo").animateFloat(
+        initialValue = -0.3f,
+        targetValue = 1.3f,
+        animationSpec = infiniteRepeatable(
+            keyframes {
+                durationMillis = 5000
+                -0.3f at 0 using FastOutSlowInEasing
+                1.3f at 1400
+                1.3f at 5000
+            }
+        ),
+        label = "brillo",
+    )
+    val shineModifier = Modifier
+        // Capa propia: el reflejo solo se pinta sobre el logotipo, no sobre el fondo.
+        .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+        .drawWithContent {
+            drawContent()
+            val band = size.height * 0.9f
+            val x = size.width * shine
+            drawRect(
+                Brush.linearGradient(
+                    listOf(Color.Transparent, Color.White.copy(alpha = if (dark) 0.55f else 0.75f), Color.Transparent),
+                    start = Offset(x - band, 0f),
+                    end = Offset(x + band * 0.4f, size.height),
+                ),
+                blendMode = BlendMode.SrcAtop,
+            )
+        }
+    Row(modifier.then(shineModifier), verticalAlignment = Alignment.CenterVertically) {
         if (showIcon && icon != null) {
             Image(
                 icon, null,
