@@ -1,0 +1,11 @@
+name: YouTube debug
+on:
+  push:
+    branches: ["ccr-138376f2-ml92dc"]
+    paths: ["tools/yt_debug.py"]
+jobs:
+  debug:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/yt_debug.py
