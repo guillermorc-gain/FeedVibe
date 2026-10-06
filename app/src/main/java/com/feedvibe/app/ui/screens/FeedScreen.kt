@@ -121,6 +121,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
 
     ScreenScaffold(
         title = "FeedVibe",
+        brand = true,
         snackbar = snackbar,
         topBarOverride = if (selection.active) {
             { EpisodeSelectionBar(selection, visible) }

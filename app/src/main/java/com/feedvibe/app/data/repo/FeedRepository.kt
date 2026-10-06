@@ -269,8 +269,15 @@ class FeedRepository(
             val existing = db.episodes().idsForSubscription(sub.id).toHashSet()
             val entities = toEntities(sub, episodes)
             db.episodes().upsertAll(entities)
-            val newIds = entities.map { it.id }.filter { it !in existing }
+            val newOnes = entities.filter { it.id !in existing }
+            val newIds = newOnes.map { it.id }
             if (markOldWatched) setWatched(newIds, true)
+            else {
+                // Los vídeos antiguos que aparecen ahora no deben salir como nuevos si ya habías
+                // marcado como visto algo posterior del canal (p. ej. «marcar canal como visto»).
+                val until = watchedUntil(sub.id)
+                if (until != null) setWatched(newOnes.filter { it.publishedAt <= until }.map { it.id }, true)
+            }
             if (!sub.fullHistory) {
                 // Se sincroniza: el resto de dispositivos cargarán también el historial.
                 val updated = (db.subscriptions().get(sub.id) ?: sub).copy(fullHistory = true, updatedAt = System.currentTimeMillis())
@@ -279,6 +286,14 @@ class FeedRepository(
             }
             newIds.size
         }
+
+    /** Fecha del episodio más reciente marcado como visto en el canal (null si no hay ninguno). */
+    private suspend fun watchedUntil(subId: String): Long? {
+        val episodes = db.episodes().forSubscription(subId)
+        val watched = episodes.map { it.id }.chunked(500).flatMap { db.states().getMany(it) }
+            .filter { it.watched }.map { it.episodeId }.toHashSet()
+        return episodes.filter { it.id in watched }.maxOfOrNull { it.publishedAt }
+    }
 
     // ---------- Estado de episodios ----------
 

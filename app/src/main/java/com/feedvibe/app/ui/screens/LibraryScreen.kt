@@ -69,6 +69,7 @@ fun LibraryScreen(nav: NavController, settings: AppSettings) {
 
     ScreenScaffold(
         title = "FeedVibe",
+        brand = true,
         topBarOverride = if (selection.active) {
             { EpisodeSelectionBar(selection, current) }
         } else null,
