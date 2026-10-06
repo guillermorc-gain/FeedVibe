@@ -83,6 +83,27 @@ def run(label, url):
         print("NO ytInitialData; title:", re.search(r"<title>(.*?)</title>", html).group(1)); return
     r = renderers(data, [])
     print("renderers:", {k: r.count(k) for k in set(r)})
+    shown = 0
+    def show(e):
+        nonlocal shown
+        if shown >= 3: return
+        if isinstance(e, dict):
+            for k, v in e.items():
+                if k == "lockupViewModel" and isinstance(v, dict) and shown < 3:
+                    shown += 1
+                    title = (((v.get("metadata") or {}).get("lockupMetadataViewModel") or {}).get("title") or {}).get("content")
+                    strs = []
+                    def allstr(x):
+                        if isinstance(x, dict): [allstr(y) for y in x.values()]
+                        elif isinstance(x, list): [allstr(y) for y in x]
+                        elif isinstance(x, str) and len(x) < 60: strs.append(x)
+                    allstr(v)
+                    print("   lockup:", v.get("contentId"), v.get("contentType"), "|", title)
+                    print("      ago:", [x for x in strs if "ago" in x], "dur:", [x for x in strs if re.match(r"^\d{1,2}(:\d{2}){1,2}$", x.strip())])
+                else: show(v)
+        elif isinstance(e, list):
+            for x in e: show(x)
+    show(data)
     conts = continuations(data, [])
     print("continuations:", len(conts))
     for p, t in conts[-4:]: print("   ", p[-200:], t)
@@ -93,7 +114,7 @@ def run(label, url):
     token = app_token(data)
     print("app token found:", bool(token))
     total = len(r)
-    for page in range(1, 80):
+    for page in range(1, 3):
         if not token: break
         body = {"context": {"client": {"clientName": "WEB", "clientVersion": ver.group(1) if ver else "2.20250101.00.00", "hl": "en", "gl": "US",
                                        **({"visitorData": vis.group(1)} if vis else {})}}, "continuation": token}

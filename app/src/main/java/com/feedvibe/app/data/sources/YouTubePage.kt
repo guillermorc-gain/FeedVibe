@@ -132,11 +132,13 @@ object YouTubePage {
         )
     }
 
+    /** Partes de la página que no son la lista de vídeos (sus tokens cargarían otra cosa). */
+    private val SKIP_KEYS = setOf("engagementPanels", "header", "frameworkUpdates", "topbar", "sidebar")
+
     /**
-     * Token para pedir la siguiente tanda de vídeos (el último que aparece en la respuesta).
-     * YouTube lo pone en sitios distintos según la página: directamente en
-     * continuationEndpoint.continuationCommand, dentro de commandExecutorCommand.commands[…]
-     * (listas de reproducción) o en el formato antiguo nextContinuationData.
+     * Token para pedir la siguiente tanda de vídeos: el último que aparece dentro de un
+     * continuationItemRenderer o continuationItemViewModel (formato nuevo de las listas),
+     * ignorando paneles laterales y la barra de filtros. Comprobado con un canal de 1.311 vídeos.
      */
     private fun lastContinuation(el: JsonElement): String? {
         var found: String? = null
@@ -153,10 +155,12 @@ object YouTubePage {
         }
         fun walk(e: JsonElement) {
             when (e) {
-                is JsonObject -> {
-                    e["continuationItemRenderer"]?.let { c -> tokenInside(c)?.let { found = it } }
-                    e.obj("nextContinuationData").str("continuation")?.let { found = it }
-                    e.values.forEach(::walk)
+                is JsonObject -> for ((k, v) in e) {
+                    when (k) {
+                        in SKIP_KEYS -> Unit
+                        "continuationItemRenderer", "continuationItemViewModel" -> tokenInside(v)?.let { found = it }
+                        else -> walk(v)
+                    }
                 }
                 is JsonArray -> e.forEach(::walk)
                 else -> Unit
