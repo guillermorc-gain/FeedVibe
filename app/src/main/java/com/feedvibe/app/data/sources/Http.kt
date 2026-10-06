@@ -15,6 +15,9 @@ object Http {
     private const val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36"
 
+    private const val DESKTOP_UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36"
+
     /** Cookies de consentimiento para que YouTube no redirija a consent.youtube.com en la UE. */
     private val consentJar = object : CookieJar {
         override fun loadForRequest(url: HttpUrl): List<Cookie> {
@@ -36,7 +39,10 @@ object Http {
         .addInterceptor { chain ->
             val req = chain.request()
             val builder = req.newBuilder()
-            if (req.header("User-Agent") == null) builder.header("User-Agent", USER_AGENT)
+            if (req.header("User-Agent") == null) {
+                // A YouTube se le pide la web de escritorio: la móvil (m.youtube.com) tiene otro formato.
+                builder.header("User-Agent", if (req.url.host.endsWith("youtube.com")) DESKTOP_UA else USER_AGENT)
+            }
             if (req.header("Accept-Language") == null) builder.header("Accept-Language", "es-ES,es;q=0.9,en;q=0.8")
             chain.proceed(builder.build())
         }

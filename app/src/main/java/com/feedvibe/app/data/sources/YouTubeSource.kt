@@ -8,11 +8,15 @@ import android.net.Uri
  */
 object YouTubeSource {
     private val channelIdRegex = Regex("""(UC[\w-]{22})""")
+    // Orden de fiabilidad: las primeras solo pueden referirse al canal de la propia página.
     private val pageChannelId = listOf(
-        Regex(""""externalId":"(UC[\w-]{22})""""),
-        Regex(""""channelId":"(UC[\w-]{22})""""),
         Regex("""<link rel="canonical" href="https://www\.youtube\.com/channel/(UC[\w-]{22})""""),
+        Regex("""<meta property="og:url" content="https://www\.youtube\.com/channel/(UC[\w-]{22})""""),
+        Regex(""""rssUrl":"https://www\.youtube\.com/feeds/videos\.xml\?channel_id=(UC[\w-]{22})""""),
+        Regex(""""externalId":"(UC[\w-]{22})""""),
         Regex("""<meta itemprop="(?:channelId|identifier)" content="(UC[\w-]{22})""""),
+        Regex(""""browseId":"(UC[\w-]{22})""""),
+        Regex(""""channelId":"(UC[\w-]{22})""""),
     )
     private val ogImage = Regex("""<meta property="og:image" content="([^"]+)"""")
     private val ogTitle = Regex("""<meta property="og:title" content="([^"]+)"""")
@@ -27,8 +31,12 @@ object YouTubeSource {
     suspend fun resolveKey(input: String): String {
         val text = input.trim()
         if (Regex("^UC[\\w-]{22}$").matches(text)) return "channel:$text"
-        if (text.startsWith("@")) return "channel:" + channelIdFromPage("https://www.youtube.com/$text")
+        if (text.startsWith("@")) return "channel:" + channelIdFromPage("https://www.youtube.com/${text.substringBefore('?')}")
         val uri = Uri.parse(if (text.startsWith("http")) text else "https://$text")
+        // youtube.com/@canal?si=… → www.youtube.com/@canal (sin parámetros de seguimiento ni m.youtube)
+        Regex("^/(@[^/?#]+)").find(uri.path.orEmpty())?.let {
+            return "channel:" + channelIdFromPage("https://www.youtube.com/${it.groupValues[1]}")
+        }
         uri.getQueryParameter("list")?.let { list ->
             if (uri.path.orEmpty().startsWith("/playlist")) return "playlist:$list"
         }
