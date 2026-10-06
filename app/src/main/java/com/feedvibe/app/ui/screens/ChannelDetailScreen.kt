@@ -5,6 +5,10 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material3.AssistChip
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.material.icons.filled.PauseCircle
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -76,7 +80,7 @@ import com.feedvibe.app.data.sources.RssSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String) {
     val container = LocalContainer.current
@@ -87,7 +91,7 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
     val sub by remember(subId) { feeds.subscription(subId) }.collectAsStateWithLifecycle(null)
     val episodes by remember(subId) { feeds.episodesFor(subId) }.collectAsStateWithLifecycle(emptyList())
     val refreshing by feeds.refreshing.collectAsStateWithLifecycle()
-    var onlyUnwatched by rememberSaveable { mutableStateOf(false) }
+    val onlyUnwatched = settings.channelHideWatched
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var editCategory by remember { mutableStateOf(false) }
@@ -98,7 +102,7 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
     val s = sub
 
     val filtered = if (onlyUnwatched) episodes.filter { !it.watched } else episodes
-    val visible = if (settings.oldestFirst) filtered.asReversed() else filtered
+    val visible = if (settings.channelOldestFirst) filtered.asReversed() else filtered
     val selection = rememberSelectionState()
     selection.order = visible.map { it.episode.id }
     val unwatched = episodes.count { !it.watched }
@@ -122,6 +126,11 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
                             text = { Text("Marcar todo como visto") },
                             leadingIcon = { Icon(Icons.Filled.DoneAll, null) },
                             onClick = { menu = false; container.appScope.launch { feeds.markAllWatched(subId) } },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (s.paused) "Reanudar actualizaciones" else "Pausar actualizaciones") },
+                            leadingIcon = { Icon(if (s.paused) Icons.Filled.PlayCircle else Icons.Filled.PauseCircle, null) },
+                            onClick = { menu = false; scope.launch { feeds.updateSubscription(s.copy(paused = !s.paused)) } },
                         )
                         if (feeds.canLoadFullHistory(s)) {
                             DropdownMenuItem(
@@ -213,21 +222,32 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
                                 )
                             }
                             Spacer(Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                FilterChip(selected = !onlyUnwatched, onClick = { onlyUnwatched = false }, label = { Text("Todos") })
-                                FilterChip(selected = onlyUnwatched, onClick = { onlyUnwatched = true }, label = { Text("Sin ver ($unwatched)") })
-                                Spacer(Modifier.weight(1f))
+                            // FlowRow: en ventanas estrechas los chips bajan de línea en vez de aplastarse.
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                FilterChip(
+                                    selected = !onlyUnwatched,
+                                    onClick = { scope.launch { container.settings.update { it.copy(channelHideWatched = false) } } },
+                                    label = { Text("Todos") },
+                                )
+                                FilterChip(
+                                    selected = onlyUnwatched,
+                                    onClick = { scope.launch { container.settings.update { it.copy(channelHideWatched = true) } } },
+                                    label = { Text("Sin ver ($unwatched)") },
+                                )
                                 AssistChip(
-                                    onClick = { scope.launch { container.settings.update { it.copy(oldestFirst = !it.oldestFirst) } } },
-                                    label = { Text(if (settings.oldestFirst) "Antiguos primero" else "Recientes primero") },
-                                    leadingIcon = { Icon(if (settings.oldestFirst) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward, null) },
+                                    onClick = { scope.launch { container.settings.update { it.copy(channelOldestFirst = !it.channelOldestFirst) } } },
+                                    label = { Text(if (settings.channelOldestFirst) "Antiguos primero" else "Recientes primero") },
+                                    leadingIcon = { Icon(if (settings.channelOldestFirst) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward, null) },
                                 )
                             }
                         }
                     }
                 }
                 items(visible, key = { it.episode.id }) { item ->
-                    EpisodeRow(item, settings.listStyle, callbacks, showChannel = false, selection = selection)
+                    EpisodeRow(item, settings.listStyle, callbacks, showChannel = false, selection = selection, swipeEnabled = settings.swipeToMark)
                 }
             }
         }
@@ -308,23 +328,22 @@ private fun FullHistoryCard(shown: Int, progress: Int?, onLoad: () -> Unit) {
         color = MaterialTheme.colorScheme.primaryContainer,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.History, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                if (progress != null) {
-                    Text("Cargando historial…", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    Text("$progress vídeos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    Spacer(Modifier.height(6.dp))
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                } else {
-                    Text("Mostrando los últimos $shown vídeos", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    Text("Carga el canal entero para ver todo lo que te falta", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                }
+        // Texto arriba y botón debajo: así cabe también en ventanas estrechas (pantalla dividida).
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.History, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    if (progress != null) "Cargando todos los vídeos… $progress" else "Mostrando los últimos $shown vídeos",
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
             }
-            if (progress == null) {
-                Spacer(Modifier.width(8.dp))
-                FilledTonalButton(onClick = onLoad) { Text("Cargar todos") }
+            Spacer(Modifier.height(8.dp))
+            if (progress != null) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            } else {
+                FilledTonalButton(onClick = onLoad, modifier = Modifier.fillMaxWidth()) { Text("Cargar todos los vídeos") }
             }
         }
     }

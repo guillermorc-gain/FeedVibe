@@ -1,6 +1,14 @@
 package com.feedvibe.app.ui.screens
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import com.feedvibe.app.ui.components.ChannelAvatar
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -57,15 +65,21 @@ fun LibraryScreen(nav: NavController, settings: AppSettings) {
 
     val selection = rememberSelectionState()
     val current = tabs[tab].third
-    selection.order = current.map { it.episode.id }
+    selection.order = current.groupBy { it.episode.subscriptionId }.values.flatten().map { it.episode.id }
 
     ScreenScaffold(
-        title = "Biblioteca",
+        title = "FeedVibe",
         topBarOverride = if (selection.active) {
             { EpisodeSelectionBar(selection, current) }
         } else null,
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            Text(
+                "Biblioteca",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
+            )
             TabRow(selectedTabIndex = tab) {
                 tabs.forEachIndexed { i, (label, icon, list) ->
                     Tab(
@@ -79,7 +93,29 @@ fun LibraryScreen(nav: NavController, settings: AppSettings) {
             val (_, icon, list) = tabs[tab]
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
                 if (list.isEmpty()) item { EmptyState(icon, "Nada por aquí", empty[tab]) }
-                items(list, key = { it.episode.id }) { EpisodeRow(it, settings.listStyle, callbacks, selection = selection) }
+                // Agrupados por canal, en el orden en que aparece cada canal.
+                list.groupBy { it.episode.subscriptionId }.forEach { (subId, group) ->
+                    val first = group.first()
+                    item(key = "h-$subId") {
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            ChannelAvatar(first.channelImage, first.channelTitle, 28.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                first.channelTitle,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text("${group.size}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    items(group, key = { it.episode.id }) {
+                        EpisodeRow(it, settings.listStyle, callbacks, showChannel = false, selection = selection, swipeEnabled = settings.swipeToMark)
+                    }
+                }
             }
         }
     }

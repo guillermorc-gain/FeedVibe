@@ -80,8 +80,18 @@ data class AppSettings(
     val channelGridSize: Int = 104,
     val channelGrid: Boolean = true,
     val showChannelNames: Boolean = true,
-    /** Orden de los episodios: false = más recientes primero, true = más antiguos primero. */
-    val oldestFirst: Boolean = false,
+    /** Orden en Novedades: false = más recientes primero, true = más antiguos primero. */
+    val feedOldestFirst: Boolean = false,
+    /** Orden dentro de cada canal. */
+    val channelOldestFirst: Boolean = false,
+    /** Dentro de un canal, mostrar solo los episodios sin ver. */
+    val channelHideWatched: Boolean = false,
+    /** Deslizar un episodio a los lados lo marca (si no, el deslizamiento cambia de pestaña). */
+    val swipeToMark: Boolean = false,
+    /** Número de episodios sin ver en el icono de la app. */
+    val iconBadge: Boolean = true,
+    /** Ancho mínimo de las tarjetas de Novedades (pellizcar para cambiarlo). */
+    val feedCardWidth: Int = 360,
     /** Pantalla Canales: mostrar solo los que tienen episodios sin ver. */
     val channelsOnlyUnwatched: Boolean = true,
 )
@@ -111,7 +121,13 @@ class SettingsRepository(private val context: Context) {
         val channelGridSize = intPreferencesKey("channel_grid_size")
         val channelGrid = booleanPreferencesKey("channel_grid")
         val showChannelNames = booleanPreferencesKey("show_channel_names")
-        val oldestFirst = booleanPreferencesKey("oldest_first")
+        val feedOldestFirst = booleanPreferencesKey("feed_oldest_first")
+        val channelOldestFirst = booleanPreferencesKey("channel_oldest_first")
+        val channelHideWatched = booleanPreferencesKey("channel_hide_watched")
+        val swipeToMark = booleanPreferencesKey("swipe_to_mark")
+        val iconBadge = booleanPreferencesKey("icon_badge")
+        val feedCardWidth = intPreferencesKey("feed_card_width")
+        val backfillV2 = booleanPreferencesKey("backfill_v2_done")
         val channelsOnlyUnwatched = booleanPreferencesKey("channels_only_unwatched")
 
         val lastRefresh = longPreferencesKey("last_refresh")
@@ -152,7 +168,12 @@ class SettingsRepository(private val context: Context) {
             channelGridSize = p[K.channelGridSize] ?: d.channelGridSize,
             channelGrid = p[K.channelGrid] ?: d.channelGrid,
             showChannelNames = p[K.showChannelNames] ?: d.showChannelNames,
-            oldestFirst = p[K.oldestFirst] ?: d.oldestFirst,
+            feedOldestFirst = p[K.feedOldestFirst] ?: d.feedOldestFirst,
+            channelOldestFirst = p[K.channelOldestFirst] ?: d.channelOldestFirst,
+            channelHideWatched = p[K.channelHideWatched] ?: d.channelHideWatched,
+            swipeToMark = p[K.swipeToMark] ?: d.swipeToMark,
+            iconBadge = p[K.iconBadge] ?: d.iconBadge,
+            feedCardWidth = p[K.feedCardWidth] ?: d.feedCardWidth,
             channelsOnlyUnwatched = p[K.channelsOnlyUnwatched] ?: d.channelsOnlyUnwatched,
         )
     }
@@ -187,7 +208,12 @@ class SettingsRepository(private val context: Context) {
             p[K.channelGridSize] = n.channelGridSize
             p[K.channelGrid] = n.channelGrid
             p[K.showChannelNames] = n.showChannelNames
-            p[K.oldestFirst] = n.oldestFirst
+            p[K.feedOldestFirst] = n.feedOldestFirst
+            p[K.channelOldestFirst] = n.channelOldestFirst
+            p[K.channelHideWatched] = n.channelHideWatched
+            p[K.swipeToMark] = n.swipeToMark
+            p[K.iconBadge] = n.iconBadge
+            p[K.feedCardWidth] = n.feedCardWidth
             p[K.channelsOnlyUnwatched] = n.channelsOnlyUnwatched
         }
     }
@@ -211,6 +237,9 @@ class SettingsRepository(private val context: Context) {
     suspend fun setSyncedUid(uid: String?) = context.dataStore.edit {
         if (uid == null) it.remove(K.syncedUid) else it[K.syncedUid] = uid
     }
+
+    suspend fun backfillDone(): Boolean = context.dataStore.data.first()[K.backfillV2] ?: false
+    suspend fun setBackfillDone() = context.dataStore.edit { it[K.backfillV2] = true }
 
     val onboardingDone: Flow<Boolean> = context.dataStore.data.map { it[K.onboardingDone] ?: false }
     suspend fun setOnboardingDone() = context.dataStore.edit { it[K.onboardingDone] = true }

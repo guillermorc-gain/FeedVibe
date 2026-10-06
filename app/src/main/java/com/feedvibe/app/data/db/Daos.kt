@@ -27,14 +27,16 @@ interface SubscriptionDao {
         """
         SELECT sub.*,
             (SELECT COUNT(*) FROM episodes e LEFT JOIN episode_states s ON s.episodeId = e.id
-                WHERE e.subscriptionId = sub.id AND COALESCE(s.watched, 0) = 0) AS unwatchedCount,
-            (SELECT COUNT(*) FROM episodes e WHERE e.subscriptionId = sub.id) AS totalCount,
+                WHERE e.subscriptionId = sub.id AND COALESCE(s.watched, 0) = 0
+                AND (:hideShorts = 0 OR e.isShort = 0)) AS unwatchedCount,
+            (SELECT COUNT(*) FROM episodes e WHERE e.subscriptionId = sub.id
+                AND (:hideShorts = 0 OR e.isShort = 0)) AS totalCount,
             (SELECT MAX(e.publishedAt) FROM episodes e WHERE e.subscriptionId = sub.id) AS latestAt
         FROM subscriptions sub
         ORDER BY sub.title COLLATE NOCASE
         """
     )
-    fun observeWithCounts(): Flow<List<SubscriptionWithCount>>
+    fun observeWithCounts(hideShorts: Boolean): Flow<List<SubscriptionWithCount>>
 
     @Query("SELECT * FROM subscriptions ORDER BY title COLLATE NOCASE")
     fun observeAll(): Flow<List<SubscriptionEntity>>
@@ -61,25 +63,37 @@ interface SubscriptionDao {
     suspend fun setRefreshResult(id: String, time: Long, error: String?)
 }
 
+private const val SHORTS = "(:hideShorts = 0 OR e.isShort = 0)"
+
 @Dao
 interface EpisodeDao {
-    @Query("$EPISODE_ITEM_SELECT ORDER BY e.publishedAt DESC LIMIT :limit")
-    fun observeAll(limit: Int): Flow<List<EpisodeItem>>
+    // Novedades: 4 variantes (todos / solo sin ver × recientes / antiguos primero).
+    @Query("$EPISODE_ITEM_SELECT WHERE $SHORTS ORDER BY e.publishedAt DESC LIMIT :limit")
+    fun observeAllDesc(hideShorts: Boolean, limit: Int): Flow<List<EpisodeItem>>
 
-    @Query("$EPISODE_ITEM_SELECT WHERE e.subscriptionId = :subId ORDER BY e.publishedAt DESC")
-    fun observeForSubscription(subId: String): Flow<List<EpisodeItem>>
+    @Query("$EPISODE_ITEM_SELECT WHERE $SHORTS ORDER BY e.publishedAt ASC LIMIT :limit")
+    fun observeAllAsc(hideShorts: Boolean, limit: Int): Flow<List<EpisodeItem>>
 
-    @Query("$EPISODE_ITEM_SELECT WHERE COALESCE(s.watchLater, 0) = 1 ORDER BY e.publishedAt DESC")
-    fun observeWatchLater(): Flow<List<EpisodeItem>>
+    @Query("$EPISODE_ITEM_SELECT WHERE COALESCE(s.watched, 0) = 0 AND $SHORTS ORDER BY e.publishedAt DESC LIMIT :limit")
+    fun observeUnwatchedDesc(hideShorts: Boolean, limit: Int): Flow<List<EpisodeItem>>
 
-    @Query("$EPISODE_ITEM_SELECT WHERE COALESCE(s.favorite, 0) = 1 ORDER BY e.publishedAt DESC")
-    fun observeFavorites(): Flow<List<EpisodeItem>>
+    @Query("$EPISODE_ITEM_SELECT WHERE COALESCE(s.watched, 0) = 0 AND $SHORTS ORDER BY e.publishedAt ASC LIMIT :limit")
+    fun observeUnwatchedAsc(hideShorts: Boolean, limit: Int): Flow<List<EpisodeItem>>
 
-    @Query("$EPISODE_ITEM_SELECT WHERE COALESCE(s.watched, 0) = 1 ORDER BY s.watchedAt DESC LIMIT 300")
-    fun observeHistory(): Flow<List<EpisodeItem>>
+    @Query("$EPISODE_ITEM_SELECT WHERE e.subscriptionId = :subId AND $SHORTS ORDER BY e.publishedAt DESC")
+    fun observeForSubscription(subId: String, hideShorts: Boolean): Flow<List<EpisodeItem>>
 
-    @Query("$EPISODE_ITEM_SELECT WHERE COALESCE(s.positionMs, 0) > 0 AND COALESCE(s.watched, 0) = 0 ORDER BY s.updatedAt DESC")
-    fun observeInProgress(): Flow<List<EpisodeItem>>
+    @Query("$EPISODE_ITEM_SELECT WHERE COALESCE(s.watchLater, 0) = 1 AND $SHORTS ORDER BY e.publishedAt DESC")
+    fun observeWatchLater(hideShorts: Boolean): Flow<List<EpisodeItem>>
+
+    @Query("$EPISODE_ITEM_SELECT WHERE COALESCE(s.favorite, 0) = 1 AND $SHORTS ORDER BY e.publishedAt DESC")
+    fun observeFavorites(hideShorts: Boolean): Flow<List<EpisodeItem>>
+
+    @Query("$EPISODE_ITEM_SELECT WHERE COALESCE(s.watched, 0) = 1 AND $SHORTS ORDER BY s.watchedAt DESC LIMIT 500")
+    fun observeHistory(hideShorts: Boolean): Flow<List<EpisodeItem>>
+
+    @Query("$EPISODE_ITEM_SELECT WHERE COALESCE(s.positionMs, 0) > 0 AND COALESCE(s.watched, 0) = 0 AND $SHORTS ORDER BY s.updatedAt DESC")
+    fun observeInProgress(hideShorts: Boolean): Flow<List<EpisodeItem>>
 
     @Query("$EPISODE_ITEM_SELECT WHERE e.id = :id")
     suspend fun getItem(id: String): EpisodeItem?
@@ -93,8 +107,11 @@ interface EpisodeDao {
     @Query("SELECT * FROM episodes WHERE subscriptionId = :subId")
     suspend fun forSubscription(subId: String): List<EpisodeEntity>
 
-    @Query("SELECT COUNT(*) FROM episodes e LEFT JOIN episode_states s ON s.episodeId = e.id WHERE COALESCE(s.watched, 0) = 0")
-    fun observeUnwatchedCount(): Flow<Int>
+    @Query("SELECT COUNT(*) FROM episodes e LEFT JOIN episode_states s ON s.episodeId = e.id WHERE COALESCE(s.watched, 0) = 0 AND $SHORTS")
+    fun observeUnwatchedCount(hideShorts: Boolean): Flow<Int>
+
+    @Query("SELECT id FROM episodes WHERE subscriptionId = :subId AND isShort = 1")
+    suspend fun shortIdsForSubscription(subId: String): List<String>
 
     @Upsert
     suspend fun upsertAll(episodes: List<EpisodeEntity>)

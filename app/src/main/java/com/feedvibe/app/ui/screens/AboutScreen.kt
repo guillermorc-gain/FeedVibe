@@ -55,6 +55,8 @@ fun AboutScreen(nav: NavController, settings: AppSettings) {
             Spacer(Modifier.height(12.dp))
             Text("FeedVibe", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("Versión ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            Text("Aplicación desarrollada por Guillermo Ríos Correa", style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(16.dp))
             when (val s = state) {
                 UpdateState.Checking -> CircularProgressIndicator()
@@ -70,7 +72,7 @@ fun AboutScreen(nav: NavController, settings: AppSettings) {
             ) { Text("Buscar actualizaciones") }
         }
         SettingsGroup {
-            SwitchRow("Buscar actualizaciones automáticamente", "Una vez al día; se instalan sin salir de la app", settings.autoUpdateCheck) { on ->
+            SwitchRow("Buscar actualizaciones automáticamente", "Cada vez que abres la app; se instalan sin salir de ella", settings.autoUpdateCheck) { on ->
                 scope.launch { container.settings.update { it.copy(autoUpdateCheck = on) } }
             }
             ListItem(

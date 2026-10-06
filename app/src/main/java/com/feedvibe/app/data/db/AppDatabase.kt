@@ -6,6 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.feedvibe.app.data.sources.SourceType
 
 class Converters {
@@ -18,7 +20,7 @@ class Converters {
 
 @Database(
     entities = [SubscriptionEntity::class, EpisodeEntity::class, EpisodeStateEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -30,7 +32,16 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "feedvibe.db")
-                .fallbackToDestructiveMigration()
+                .addMigrations(MIGRATION_1_2)
                 .build()
+
+        /** v2: canales en pausa y marca de Shorts. Conserva todos los datos. */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE subscriptions ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE episodes ADD COLUMN isShort INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE episodes SET isShort = 1 WHERE url LIKE '%/shorts/%'")
+            }
+        }
     }
 }

@@ -73,8 +73,13 @@ fun ImportOpmlScreen(nav: NavController) {
                         container.feeds.markSubscriptionsWatched(r.added)
                     }
                 }
+                if (r.added.isNotEmpty()) {
+                    // Después, todos los vídeos de cada canal de YouTube, en segundo plano.
+                    container.appScope.launch { container.feeds.loadFullHistoryMany(r.added, markOldWatched = mark) }
+                }
                 result = buildString {
                     append("✔ ${r.added.size} canales añadidos")
+                    if (r.added.isNotEmpty()) append("\nCargando todos los vídeos de cada canal en segundo plano…")
                     if (r.alreadyHad > 0) append("\n${r.alreadyHad} ya los tenías")
                     if (r.failed.isNotEmpty()) append("\n${r.failed.size} no se pudieron añadir: ${r.failed.take(5).joinToString()}" + if (r.failed.size > 5) "…" else "")
                 }
@@ -140,7 +145,7 @@ fun ImportOpmlScreen(nav: NavController) {
                 Spacer(Modifier.height(16.dp))
                 Text(it, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { (nav as? androidx.navigation.NavHostController)?.navigateTab(Routes.CHANNELS) ?: nav.navigate(Routes.CHANNELS) }) { Text("Ver mis canales") }
+                OutlinedButton(onClick = { nav.navigateTab(Routes.CHANNELS) }) { Text("Ver mis canales") }
             }
         }
     }

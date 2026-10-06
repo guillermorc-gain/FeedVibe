@@ -37,6 +37,13 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.PauseCircle
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import com.feedvibe.app.ui.components.pinchToZoom
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.MoreVert
@@ -117,6 +124,7 @@ enum class ChannelSort(val label: String) {
 private const val MIN_SIZE = 56f
 private const val MAX_SIZE = 200f
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChannelsScreen(nav: NavController, settings: AppSettings) {
     val container = LocalContainer.current
@@ -125,11 +133,12 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
     val sort = ChannelSort.entries.firstOrNull { it.name == settings.channelSort } ?: ChannelSort.NAME
     val grid = settings.channelGrid
     var sortMenu by remember { mutableStateOf(false) }
-    var zoomBar by rememberSaveable { mutableStateOf(false) }
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     // Tamaño "en vivo" mientras se pellizca/arrastra; se guarda al soltar.
-    var size by remember(settings.channelGridSize) { mutableFloatStateOf(settings.channelGridSize.toFloat()) }
+    var size by remember { mutableFloatStateOf(settings.channelGridSize.toFloat()) }
+    val refreshing by container.feeds.refreshing.collectAsStateWithLifecycle()
+    val backfill by container.feeds.historyProgress.collectAsStateWithLifecycle()
     val selection = rememberSelectionState()
     val isAddress = looksLikeChannelAddress(query)
 
@@ -158,7 +167,7 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
     selection.order = sorted.map { it.subscription.id }
 
     ScreenScaffold(
-        title = "Canales (${subs.size})",
+        title = "FeedVibe",
         topBarOverride = if (selection.active) {
             { ChannelSelectionBar(selection) }
         } else null,
@@ -185,9 +194,6 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
             IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
                 Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, "Buscar")
             }
-            if (grid) {
-                IconButton(onClick = { zoomBar = !zoomBar }) { Icon(Icons.Filled.ZoomIn, "Tamaño de los logos") }
-            }
             Box {
                 IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Ordenar") }
                 DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
@@ -198,6 +204,15 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
                             onClick = {
                                 sortMenu = false
                                 scope.launch { container.settings.update { it.copy(channelSort = s.name) } }
+                            },
+                        )
+                    }
+                    if (grid) {
+                        DropdownMenuItem(
+                            text = { Text(if (settings.showChannelNames) "Ocultar nombres" else "Mostrar nombres") },
+                            onClick = {
+                                sortMenu = false
+                                scope.launch { container.settings.update { it.copy(showChannelNames = !it.showChannelNames) } }
                             },
                         )
                     }
@@ -224,17 +239,16 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            if (zoomBar && grid) {
-                ZoomBar(
-                    size = size,
-                    showNames = settings.showChannelNames,
-                    onSize = { size = it },
-                    onSizeDone = { saveSize() },
-                    onShowNames = { v -> scope.launch { container.settings.update { it.copy(showChannelNames = v) } } },
+            if (!searching) {
+                Text(
+                    "Canales (${subs.size})",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 16.dp, top = 4.dp),
                 )
             }
             if (subs.isNotEmpty() && !searching) {
-                Row(
+                FlowRow(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -249,6 +263,18 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
                         label = { Text("Todos (${subs.size})") },
                     )
                 }
+            }
+            if (backfill.isNotEmpty()) {
+                val (id, n) = backfill.entries.first()
+                val name = subs.firstOrNull { it.subscription.id == id }?.subscription?.title ?: ""
+                Text(
+                    "Cargando todos los vídeos de $name… ($n)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                )
             }
             if (isAddress) {
                 AddFromSearchCard(query) {
@@ -280,6 +306,11 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
                     }
                 }
             } else {
+                PullToRefreshBox(
+                    isRefreshing = refreshing,
+                    onRefresh = { scope.launch { container.feeds.refreshAll() } },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
                 LazyVerticalGrid(
                     columns = if (grid) GridCells.Adaptive(size.dp) else GridCells.Fixed(1),
                     contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 96.dp),
@@ -288,25 +319,12 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
                     modifier = Modifier
                         .fillMaxSize()
                         // Pellizcar con dos dedos agranda o reduce los logos (como en Podcast Addict).
-                        .pointerInput(grid) {
-                            if (!grid) return@pointerInput
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                var zoomed = false
-                                do {
-                                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                                    if (event.changes.count { it.pressed } >= 2) {
-                                        val zoom = event.calculateZoom()
-                                        if (zoom != 1f) {
-                                            size = (size * zoom).coerceIn(MIN_SIZE, MAX_SIZE)
-                                            zoomed = true
-                                            event.changes.forEach { it.consume() }
-                                        }
-                                    }
-                                } while (event.changes.any { it.pressed })
-                                if (zoomed) saveSize()
-                            }
-                        },
+                        .then(
+                            if (grid) Modifier.pinchToZoom(
+                                onZoom = { z -> size = (size * z).coerceIn(MIN_SIZE, MAX_SIZE) },
+                                onEnd = { saveSize() },
+                            ) else Modifier
+                        ),
                 ) {
                     grouped.forEach { (category, list) ->
                         if (grouped.size > 1) {
@@ -330,36 +348,8 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
                         }
                     }
                 }
+                }
             }
-        }
-    }
-}
-
-@Composable
-private fun ZoomBar(size: Float, showNames: Boolean, onSize: (Float) -> Unit, onSizeDone: () -> Unit, onShowNames: (Boolean) -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { onSize((size - 16f).coerceAtLeast(MIN_SIZE)); onSizeDone() }) { Icon(Icons.Filled.ZoomOut, "Más pequeños") }
-                Slider(
-                    value = size,
-                    onValueChange = onSize,
-                    onValueChangeFinished = onSizeDone,
-                    valueRange = MIN_SIZE..MAX_SIZE,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = { onSize((size + 16f).coerceAtMost(MAX_SIZE)); onSizeDone() }) { Icon(Icons.Filled.ZoomIn, "Más grandes") }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onShowNames(!showNames) }) {
-                Text("Mostrar nombres", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).padding(start = 12.dp))
-                Switch(checked = showNames, onCheckedChange = onShowNames)
-            }
-            Text(
-                "Consejo: también puedes pellizcar la cuadrícula con dos dedos.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 12.dp, bottom = 4.dp),
-            )
         }
     }
 }
@@ -412,8 +402,12 @@ private fun ChannelTile(
                         .padding(horizontal = 5.dp, vertical = 1.dp),
                 )
             }
-            if (size >= 90f) {
-                SourceBadge(sub.type, Modifier.align(Alignment.BottomStart).padding(4.dp))
+            if (sub.paused) {
+                Icon(
+                    Icons.Filled.PauseCircle, "Actualizaciones en pausa",
+                    tint = Color.White,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(4.dp).background(Color(0x99000000), CircleShape),
+                )
             }
             if (sub.lastError != null) {
                 Icon(
@@ -460,6 +454,7 @@ private fun ChannelListRow(s: SubscriptionWithCount, selected: Boolean, onClick:
                 Text(s.subscription.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     SourceBadge(s.subscription.type)
+                    if (s.subscription.paused) Icon(Icons.Filled.PauseCircle, "En pausa", Modifier.size(14.dp))
                     Text(
                         "${s.totalCount} episodios" + (s.latestAt?.let { " · último ${relativeTime(it)}" } ?: ""),
                         style = MaterialTheme.typography.bodySmall,
@@ -496,6 +491,20 @@ private fun ChannelSelectionBar(selection: SelectionState) {
                 DropdownMenuItem(text = { Text("Seleccionar todos") }, onClick = { menu = false; selection.selectAll() })
                 DropdownMenuItem(text = { Text("Invertir selección") }, onClick = { menu = false; selection.invert() })
                 DropdownMenuItem(text = { Text("Actualizar ahora") }, onClick = { menu = false; run { feeds.refreshAll(it) } })
+                DropdownMenuItem(
+                    text = { Text("Pausar actualizaciones") },
+                    leadingIcon = { Icon(Icons.Filled.PauseCircle, null) },
+                    onClick = { menu = false; run { feeds.setPaused(it, true) } },
+                )
+                DropdownMenuItem(
+                    text = { Text("Reanudar actualizaciones") },
+                    leadingIcon = { Icon(Icons.Filled.PlayCircle, null) },
+                    onClick = { menu = false; run { feeds.setPaused(it, false) } },
+                )
+                DropdownMenuItem(
+                    text = { Text("Cargar todos los vídeos") },
+                    onClick = { menu = false; run { feeds.loadFullHistoryMany(it, markOldWatched = false) } },
+                )
                 DropdownMenuItem(text = { Text("Cambiar categoría") }, onClick = { menu = false; editCategory = true })
                 DropdownMenuItem(
                     text = { Text("Activar notificaciones") },

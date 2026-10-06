@@ -22,6 +22,8 @@ data class SubscriptionEntity(
     val notify: Boolean = true,
     /** Se ha cargado (o se debe cargar) el historial completo del canal, no solo los últimos del RSS. */
     val fullHistory: Boolean = false,
+    /** Actualizaciones desactivadas: no se buscan vídeos nuevos de este canal. */
+    @ColumnInfo(defaultValue = "0") val paused: Boolean = false,
     val addedAt: Long = System.currentTimeMillis(),
     val lastRefreshed: Long = 0,
     val lastError: String? = null,
@@ -46,6 +48,8 @@ data class EpisodeEntity(
     val publishedAt: Long,
     val durationSec: Long = 0,
     val isLive: Boolean = false,
+    /** Short de YouTube (se ocultan si así se elige en Ajustes). */
+    @ColumnInfo(defaultValue = "0") val isShort: Boolean = false,
     val discoveredAt: Long = System.currentTimeMillis(),
 )
 

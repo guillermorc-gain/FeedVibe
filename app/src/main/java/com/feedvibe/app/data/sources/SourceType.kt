@@ -37,6 +37,7 @@ data class ParsedEpisode(
     val publishedAt: Long,
     val durationSec: Long = 0,
     val isLive: Boolean = false,
+    val isShort: Boolean = false,
 )
 
 /** Error con mensaje legible para el usuario. */

@@ -34,13 +34,13 @@ class MainActivity : ComponentActivity() {
             if (s.refreshOnOpen) runCatching { container.feeds.refreshAll() }
         }
         lifecycleScope.launch {
-            val s = container.settings.current()
-            val day = 24 * 60 * 60 * 1000L
-            if (s.autoUpdateCheck && System.currentTimeMillis() - container.settings.lastUpdateCheck() > day) {
+            // Buscar actualizaciones cada vez que se abre la app.
+            if (container.settings.current().autoUpdateCheck) {
                 container.settings.setLastUpdateCheck(System.currentTimeMillis())
                 container.updater.check()
             }
         }
+        container.startBackgroundJobs()
 
         setContent {
             val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)

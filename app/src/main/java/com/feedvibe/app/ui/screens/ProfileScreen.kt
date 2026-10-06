@@ -76,6 +76,7 @@ import com.feedvibe.app.data.prefs.AppSettings
 import com.feedvibe.app.data.sync.SyncStatus
 import com.feedvibe.app.ui.LocalContainer
 import com.feedvibe.app.ui.Routes
+import com.feedvibe.app.ui.navigateTab
 import com.feedvibe.app.ui.components.UserAvatar
 import kotlinx.coroutines.launch
 import java.io.File
@@ -203,9 +204,9 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                StatCard("Canales", subs.size.toString(), Modifier.weight(1f)) { nav.navigate(Routes.CHANNELS) }
-                StatCard("Sin ver", unwatched.toString(), Modifier.weight(1f)) { nav.navigate(Routes.FEED) }
-                StatCard("Vistos", watched.toString(), Modifier.weight(1f)) { nav.navigate(Routes.LIBRARY) }
+                StatCard("Canales", subs.size.toString(), Modifier.weight(1f)) { nav.navigateTab(Routes.CHANNELS) }
+                StatCard("Sin ver", unwatched.toString(), Modifier.weight(1f)) { nav.navigateTab(Routes.FEED) }
+                StatCard("Vistos", watched.toString(), Modifier.weight(1f)) { nav.navigateTab(Routes.LIBRARY) }
             }
 
             // ---------- Ajustes ----------

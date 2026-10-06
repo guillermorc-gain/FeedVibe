@@ -17,8 +17,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 /** Inyección de dependencias manual. */
+@OptIn(FlowPreview::class)
 class AppContainer(val context: Context) {
     /** Ámbito global: un fallo en una tarea no tumba la app, solo se registra. */
     val appScope = CoroutineScope(
@@ -50,6 +56,30 @@ class AppContainer(val context: Context) {
             auth.user.collect { u ->
                 if (u != null) cloud.start(u.uid) else cloud.stop()
             }
+        }
+    }
+
+    private var backgroundStarted = false
+
+    /**
+     * Tareas al abrir la app:
+     * - Cargar todos los vídeos de los canales de YouTube que solo tienen los últimos (importados…).
+     *   Una vez se recargan también los ya cargados (títulos en español y marca de Shorts).
+     * - Mantener el número de episodios sin ver en el icono de la app.
+     */
+    fun startBackgroundJobs() {
+        if (backgroundStarted) return
+        backgroundStarted = true
+        appScope.launch {
+            val reloadAll = !settings.backfillDone()
+            feeds.backfillFullHistory(includeAlreadyLoaded = reloadAll)
+            if (reloadAll) settings.setBackfillDone()
+        }
+        appScope.launch {
+            combine(feeds.unwatchedCount, settings.settings.map { it.iconBadge }) { n, on -> if (on) n else 0 }
+                .distinctUntilChanged()
+                .debounce(1500)
+                .collect { notifier.updateBadge(it) }
         }
     }
 

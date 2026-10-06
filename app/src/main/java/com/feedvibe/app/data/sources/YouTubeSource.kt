@@ -52,14 +52,15 @@ object YouTubeSource {
         throw SourceException("No se ha encontrado el canal de YouTube")
     }
 
-    fun feedUrl(key: String, hideShorts: Boolean): String {
+    /**
+     * Feed RSS de todas las subidas. Los Shorts no se excluyen aquí: llevan /shorts/ en el
+     * enlace, se marcan como tales y se ocultan en pantalla si así se ha elegido.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun feedUrl(key: String, hideShorts: Boolean = false): String {
         val (kind, id) = key.split(':', limit = 2).let { it[0] to it.getOrElse(1) { "" } }
-        return when {
-            kind == "playlist" -> "https://www.youtube.com/feeds/videos.xml?playlist_id=$id"
-            // La lista "UULF" de un canal contiene solo vídeos largos (sin Shorts ni directos).
-            hideShorts -> "https://www.youtube.com/feeds/videos.xml?playlist_id=UULF${id.removePrefix("UC")}"
-            else -> "https://www.youtube.com/feeds/videos.xml?channel_id=$id"
-        }
+        return if (kind == "playlist") "https://www.youtube.com/feeds/videos.xml?playlist_id=$id"
+        else "https://www.youtube.com/feeds/videos.xml?channel_id=$id"
     }
 
     suspend fun fetch(key: String, hideShorts: Boolean, fetchChannelInfo: Boolean): ParsedFeed {
@@ -88,7 +89,10 @@ object YouTubeSource {
             siteUrl = site,
             episodes = feed.episodes.map { ep ->
                 // Los Shorts publicados aparecen con enlace /shorts/ en algunos feeds.
-                ep.copy(url = ep.url.ifBlank { "https://www.youtube.com/watch?v=${ep.guid}" })
+                ep.copy(
+                    url = ep.url.ifBlank { "https://www.youtube.com/watch?v=${ep.guid}" },
+                    isShort = ep.isShort || ep.url.contains("/shorts/"),
+                )
             },
         )
     }
@@ -100,11 +104,8 @@ object YouTubeSource {
     private suspend fun fetchRssWithFallbacks(key: String, hideShorts: Boolean): ParsedFeed? {
         val id = key.substringAfter(':')
         val urls = buildList {
-            add(feedUrl(key, hideShorts))
-            if (key.startsWith("channel:")) {
-                add("https://www.youtube.com/feeds/videos.xml?playlist_id=UU${id.removePrefix("UC")}")
-                add(feedUrl(key, false))
-            }
+            add(feedUrl(key))
+            if (key.startsWith("channel:")) add("https://www.youtube.com/feeds/videos.xml?playlist_id=UU${id.removePrefix("UC")}")
         }.distinct()
         for (url in urls) {
             repeat(2) { attempt ->

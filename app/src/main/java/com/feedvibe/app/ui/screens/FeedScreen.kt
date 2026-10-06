@@ -8,8 +8,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material3.RadioButton
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.text.font.FontWeight
+import com.feedvibe.app.ui.components.pinchToZoom
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -73,7 +79,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
     val feeds = container.feeds
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    val all by feeds.allEpisodes.collectAsStateWithLifecycle(emptyList())
+    val all by feeds.feedEpisodes.collectAsStateWithLifecycle(emptyList())
     val subs by feeds.subscriptionsWithCounts.collectAsStateWithLifecycle(emptyList())
     val categories by feeds.categories.collectAsStateWithLifecycle(emptyList())
     val refreshing by feeds.refreshing.collectAsStateWithLifecycle()
@@ -88,14 +94,16 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
 
     val subCategory = remember(subs) { subs.associate { it.subscription.id to it.subscription.category } }
     val presentTypes = remember(subs) { subs.map { it.subscription.type }.distinct().sortedBy { it.ordinal } }
-    val visible = remember(all, typeFilter, categoryFilter, query, settings.hideWatched, settings.oldestFirst) {
+    // El orden y «ocultar vistos» ya vienen aplicados desde la base de datos.
+    val visible = remember(all, typeFilter, categoryFilter, query) {
         all.filter { item ->
-            (!settings.hideWatched || !item.watched) &&
-                (typeFilter == null || item.sourceType.name == typeFilter) &&
+            (typeFilter == null || item.sourceType.name == typeFilter) &&
                 (categoryFilter == null || subCategory[item.episode.subscriptionId] == categoryFilter) &&
                 (query.isBlank() || item.episode.title.contains(query, true) || item.channelTitle.contains(query, true))
-        }.let { if (settings.oldestFirst) it.asReversed() else it }
+        }
     }
+    // Ancho de las tarjetas: se cambia pellizcando con dos dedos.
+    var cardWidth by remember { mutableFloatStateOf(settings.feedCardWidth.toFloat()) }
     val callbacks = rememberEpisodeCallbacks(nav)
     val selection = rememberSelectionState()
     selection.order = visible.map { it.episode.id }
@@ -112,7 +120,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
     }
 
     ScreenScaffold(
-        title = "Novedades",
+        title = "FeedVibe",
         snackbar = snackbar,
         topBarOverride = if (selection.active) {
             { EpisodeSelectionBar(selection, visible) }
@@ -152,14 +160,18 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                             scope.launch { container.settings.update { it.copy(hideWatched = !it.hideWatched) } }
                         },
                     )
-                    DropdownMenuItem(
-                        text = { Text(if (settings.oldestFirst) "Más recientes primero" else "Más antiguos primero") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, null) },
-                        onClick = {
-                            menu = false
-                            scope.launch { container.settings.update { it.copy(oldestFirst = !it.oldestFirst) } }
-                        },
-                    )
+                    listOf(false to "Más recientes primero", true to "Más antiguos primero").forEach { (oldest, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label, fontWeight = if (settings.feedOldestFirst == oldest) FontWeight.Bold else FontWeight.Normal) },
+                            leadingIcon = {
+                                RadioButton(selected = settings.feedOldestFirst == oldest, onClick = null)
+                            },
+                            onClick = {
+                                menu = false
+                                scope.launch { container.settings.update { it.copy(feedOldestFirst = oldest) } }
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("Marcar lista como vista") },
                         leadingIcon = { Icon(Icons.Filled.DoneAll, null) },
@@ -181,9 +193,16 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
             onRefresh = { refresh() },
             modifier = Modifier.fillMaxSize().padding(padding),
         ) {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(cardWidth.dp),
+                modifier = Modifier.fillMaxSize().pinchToZoom(
+                    onZoom = { z -> cardWidth = (cardWidth * z).coerceIn(150f, 900f) },
+                    onEnd = { scope.launch { container.settings.update { it.copy(feedCardWidth = cardWidth.toInt()) } } },
+                ),
+                contentPadding = PaddingValues(bottom = 96.dp),
+            ) {
                 if (isAddress) {
-                    item {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                         AddFromSearchCard(query) {
                             nav.navigate(Routes.add(query.trim()))
                             query = ""
@@ -191,7 +210,15 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                         }
                     }
                 }
-                item {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Text(
+                        "Novedades",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 16.dp, top = 4.dp),
+                    )
+                }
+                item(span = { GridItemSpan(maxLineSpan) }) {
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -217,7 +244,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                         }
                     }
                 }
-                item {
+                item(span = { GridItemSpan(maxLineSpan) }) {
                     Text(
                         buildString {
                             append("${visible.count { !it.watched }} sin ver")
@@ -229,7 +256,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                     )
                 }
                 if (visible.isEmpty() && !isAddress) {
-                    item {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                         if (subs.isEmpty()) {
                             EmptyState(
                                 Icons.Filled.NewReleases,
@@ -242,7 +269,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                     }
                 }
                 items(visible, key = { it.episode.id }) { item ->
-                    EpisodeRow(item, settings.listStyle, callbacks, selection = selection)
+                    EpisodeRow(item, settings.listStyle, callbacks, selection = selection, swipeEnabled = settings.swipeToMark)
                 }
             }
         }

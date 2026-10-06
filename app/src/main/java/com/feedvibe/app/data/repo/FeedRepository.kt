@@ -16,6 +16,11 @@ import com.feedvibe.app.data.sources.SourceResolver
 import com.feedvibe.app.data.sources.SourceType
 import com.feedvibe.app.data.sync.CloudSync
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -34,6 +39,7 @@ data class NewEpisodes(val subscription: SubscriptionEntity, val episodes: List<
 
 data class RefreshResult(val newEpisodes: List<NewEpisodes>, val errors: Int)
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class FeedRepository(
     private val db: AppDatabase,
     private val settings: SettingsRepository,
@@ -48,16 +54,33 @@ class FeedRepository(
     val historyProgress: StateFlow<Map<String, Int>> = _historyProgress.asStateFlow()
 
     // ---------- Lectura ----------
-    val subscriptionsWithCounts = db.subscriptions().observeWithCounts()
+    // Todas las listas reaccionan al ajuste «Ocultar Shorts».
+    private val hideShorts = settings.settings.map { it.hideShorts }.distinctUntilChanged()
+
+    val subscriptionsWithCounts = hideShorts.flatMapLatest { db.subscriptions().observeWithCounts(it) }
     val categories = db.subscriptions().observeCategories()
-    val allEpisodes = db.episodes().observeAll(1500)
-    fun episodesFor(subId: String) = db.episodes().observeForSubscription(subId)
+
+    /** Novedades: según «ocultar vistos» y el orden elegido. */
+    val feedEpisodes: Flow<List<EpisodeItem>> = settings.settings
+        .map { Triple(it.hideShorts, it.hideWatched, it.feedOldestFirst) }
+        .distinctUntilChanged()
+        .flatMapLatest { (shorts, onlyUnwatched, oldestFirst) ->
+            val dao = db.episodes()
+            when {
+                onlyUnwatched && oldestFirst -> dao.observeUnwatchedAsc(shorts, 3000)
+                onlyUnwatched -> dao.observeUnwatchedDesc(shorts, 3000)
+                oldestFirst -> dao.observeAllAsc(shorts, 3000)
+                else -> dao.observeAllDesc(shorts, 3000)
+            }
+        }
+
+    fun episodesFor(subId: String) = hideShorts.flatMapLatest { db.episodes().observeForSubscription(subId, it) }
     fun subscription(subId: String) = db.subscriptions().observe(subId)
-    val watchLater = db.episodes().observeWatchLater()
-    val favorites = db.episodes().observeFavorites()
-    val history = db.episodes().observeHistory()
-    val inProgress = db.episodes().observeInProgress()
-    val unwatchedCount = db.episodes().observeUnwatchedCount()
+    val watchLater = hideShorts.flatMapLatest { db.episodes().observeWatchLater(it) }
+    val favorites = hideShorts.flatMapLatest { db.episodes().observeFavorites(it) }
+    val history = hideShorts.flatMapLatest { db.episodes().observeHistory(it) }
+    val inProgress = hideShorts.flatMapLatest { db.episodes().observeInProgress(it) }
+    val unwatchedCount = hideShorts.flatMapLatest { db.episodes().observeUnwatchedCount(it) }
     val watchedCount = db.states().observeWatchedCount()
     fun episode(id: String) = db.episodes().observeItem(id)
     suspend fun getEpisode(id: String) = db.episodes().getItem(id)
@@ -142,6 +165,7 @@ class FeedRepository(
                 publishedAt = e.publishedAt,
                 durationSec = e.durationSec,
                 isLive = e.isLive,
+                isShort = e.isShort || e.url.contains("/shorts/"),
             )
         }
 
@@ -180,7 +204,8 @@ class FeedRepository(
             _refreshing.value = true
             try {
                 val hideShorts = settings.current().hideShorts
-                val subs = db.subscriptions().getAll().filter { onlyIds == null || it.id in onlyIds }
+                // Los canales en pausa no se actualizan (salvo que se pida uno concreto).
+                val subs = db.subscriptions().getAll().filter { if (onlyIds == null) !it.paused else it.id in onlyIds }
                 val limiter = Semaphore(6)
                 val errors = AtomicInteger(0)
                 val results = coroutineScope {
@@ -237,7 +262,7 @@ class FeedRepository(
                 }
                 // Con clave: API oficial (fechas exactas y duraciones). Sin clave: la página del canal.
                 if (apiKey.isNotBlank()) YouTubeApi.fetchAll(apiKey, sub.sourceKey, settings.current().hideShorts, onProgress = progress)
-                else YouTubePage.fetchAll(sub.sourceKey, settings.current().hideShorts, onProgress = progress)
+                else YouTubePage.fetchAll(sub.sourceKey, onProgress = progress)
             } finally {
                 _historyProgress.update { it - subId }
             }
@@ -312,6 +337,23 @@ class FeedRepository(
     suspend fun resetProgress(ids: List<String>) = updateStates(ids) { it.copy(positionMs = 0) }
 
     suspend fun unsubscribeMany(subIds: Collection<String>) = subIds.forEach { unsubscribe(it) }
+
+    suspend fun setPaused(subIds: Collection<String>, paused: Boolean) = updateSubscriptions(subIds) { it.copy(paused = paused) }
+
+    /** Carga el historial completo de varios canales, uno detrás de otro. */
+    suspend fun loadFullHistoryMany(subIds: Collection<String>, markOldWatched: Boolean) {
+        for (id in subIds) runCatching { loadFullHistory(id, markOldWatched) }
+    }
+
+    /**
+     * Canales de YouTube que aún no tienen el historial completo (p. ej. importados de un OPML)
+     * o que se cargaron con una versión anterior (títulos en inglés, Shorts sin marcar).
+     */
+    suspend fun backfillFullHistory(includeAlreadyLoaded: Boolean) {
+        val subs = db.subscriptions().getAll()
+            .filter { it.type == SourceType.YOUTUBE && !it.paused && (includeAlreadyLoaded || !it.fullHistory) }
+        loadFullHistoryMany(subs.map { it.id }, markOldWatched = false)
+    }
 
     suspend fun markSubscriptionsWatched(subIds: Collection<String>) = subIds.forEach { markAllWatched(it) }
 

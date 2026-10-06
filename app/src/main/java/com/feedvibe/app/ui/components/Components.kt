@@ -66,6 +66,8 @@ import com.feedvibe.app.ui.relativeTime
 
 @Composable
 fun SourceBadge(type: SourceType, modifier: Modifier = Modifier) {
+    // Casi todo es YouTube: su etiqueta solo añade ruido. Se muestra para el resto de plataformas.
+    if (type == SourceType.YOUTUBE) return
     Surface(
         color = Color(type.colorHex),
         shape = RoundedCornerShape(6.dp),
@@ -152,6 +154,7 @@ fun EpisodeRow(
     callbacks: EpisodeCallbacks,
     showChannel: Boolean = true,
     selection: SelectionState? = null,
+    swipeEnabled: Boolean = true,
 ) {
     val current by rememberUpdatedState(item)
     val selecting = selection?.active == true
@@ -174,8 +177,8 @@ fun EpisodeRow(
             false // la fila no desaparece: solo cambia su estado
         },
     )
-    if (selecting) {
-        // En modo selección no se desliza: solo se marca/desmarca.
+    if (selecting || !swipeEnabled) {
+        // En modo selección (o si el deslizamiento está desactivado) la fila no se desliza.
         when (style) {
             ListStyle.CARDS -> EpisodeCard(item, callbacks, showChannel, selected, onClick, onLongClick)
             ListStyle.COMPACT -> EpisodeCompact(item, callbacks, showChannel, selected, onClick, onLongClick)

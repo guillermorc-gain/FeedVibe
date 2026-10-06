@@ -27,6 +27,8 @@ class Notifier(private val context: Context) {
         const val CHANNEL_EPISODES = "episodes"
         const val CHANNEL_LIVE = "live"
         const val CHANNEL_SYSTEM = "system"
+        const val CHANNEL_BADGE = "badge"
+        private const val BADGE_ID = 4100
         private const val GROUP = "com.feedvibe.NEW_EPISODES"
         const val EXTRA_EPISODE_ID = "episode_id"
         const val EXTRA_NOTIFICATION_ID = "notification_id"
@@ -43,6 +45,12 @@ class Notifier(private val context: Context) {
                 NotificationChannel(CHANNEL_LIVE, "Directos", NotificationManager.IMPORTANCE_HIGH)
                     .apply { description = "Cuando un canal empieza un directo" },
                 NotificationChannel(CHANNEL_SYSTEM, "Copias y actualizaciones", NotificationManager.IMPORTANCE_LOW),
+                NotificationChannel(CHANNEL_BADGE, "Contador de episodios sin ver", NotificationManager.IMPORTANCE_MIN).apply {
+                    description = "Muestra el número de episodios sin ver en el icono de la app"
+                    setShowBadge(true)
+                    setSound(null, null)
+                    enableVibration(false)
+                },
             )
         )
     }
@@ -140,4 +148,38 @@ class Notifier(private val context: Context) {
     }
 
     fun cancel(id: Int) = NotificationManagerCompat.from(context).cancel(id)
+
+    /**
+     * Número en el icono de la app. Android no deja poner un número directamente: los launchers
+     * (Samsung, Xiaomi…) lo toman del número de una notificación. Se usa una notificación
+     * silenciosa y mínima con setNumber; con 0 se quita.
+     */
+    @SuppressLint("MissingPermission")
+    fun updateBadge(count: Int) {
+        val nm = NotificationManagerCompat.from(context)
+        if (count <= 0 || !canPost()) {
+            nm.cancel(BADGE_ID)
+        } else {
+            val n = NotificationCompat.Builder(context, CHANNEL_BADGE)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("$count episodios sin ver")
+                .setNumber(count)
+                .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setSilent(true)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .setContentIntent(openAppIntent(BADGE_ID))
+                .build()
+            runCatching { nm.notify(BADGE_ID, n) }
+        }
+        // Launchers antiguos de Samsung/LG/Sony leen este aviso.
+        runCatching {
+            context.sendBroadcast(Intent("android.intent.action.BADGE_COUNT_UPDATE").apply {
+                putExtra("badge_count", count.coerceAtLeast(0))
+                putExtra("badge_count_package_name", context.packageName)
+                putExtra("badge_count_class_name", MainActivity::class.java.name)
+            })
+        }
+    }
 }
