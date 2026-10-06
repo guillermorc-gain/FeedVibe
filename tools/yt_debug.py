@@ -44,6 +44,36 @@ def continuations(e, out, path=""):
         for i, x in enumerate(e): continuations(x, out, path + f"[{i}]")
     return out
 
+SKIP = {"engagementPanels", "header", "frameworkUpdates", "topbar", "sidebar"}
+def app_token(e):
+    """Lógica nueva de la app: último token dentro de continuationItemRenderer/ViewModel, sin paneles laterales."""
+    found = None
+    def inside(x):
+        if isinstance(x, dict):
+            if isinstance(x.get("continuationCommand"), dict) and "token" in x["continuationCommand"]:
+                return x["continuationCommand"]["token"]
+            for v in x.values():
+                t = inside(v)
+                if t: return t
+        elif isinstance(x, list):
+            for v in x:
+                t = inside(v)
+                if t: return t
+    def walk(x):
+        nonlocal found
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if k in SKIP: continue
+                if k in ("continuationItemRenderer", "continuationItemViewModel"):
+                    t = inside(v)
+                    if t: found = t
+                else:
+                    walk(v)
+        elif isinstance(x, list):
+            for v in x: walk(v)
+    walk(e)
+    return found
+
 def run(label, url):
     print(f"\n===== {label}: {url}")
     st, html = get(url)
@@ -60,44 +90,20 @@ def run(label, url):
     vis = re.search(r'"VISITOR_DATA":"([^"]+)"', html)
     print("clientVersion", ver and ver.group(1), "visitorData", bool(vis))
     if not conts: return
-    token = None
-    # token como lo busca la app: dentro de continuationItemRenderer
-    def find_cir(e):
-        nonlocal token
-        if isinstance(e, dict):
-            if "continuationItemRenderer" in e:
-                c = continuations(e["continuationItemRenderer"], [])
-                if c:
-                    # token completo
-                    def full(x):
-                        if isinstance(x, dict):
-                            if "continuationCommand" in x: return x["continuationCommand"]["token"]
-                            for v in x.values():
-                                f = full(v)
-                                if f: return f
-                        if isinstance(x, list):
-                            for v in x:
-                                f = full(v)
-                                if f: return f
-                    token = full(e["continuationItemRenderer"])
-            for v in e.values(): find_cir(v)
-        elif isinstance(e, list):
-            for v in e: find_cir(v)
-    find_cir(data)
+    token = app_token(data)
     print("app token found:", bool(token))
     total = len(r)
-    for page in range(1, 6):
+    for page in range(1, 80):
         if not token: break
         body = {"context": {"client": {"clientName": "WEB", "clientVersion": ver.group(1) if ver else "2.20250101.00.00", "hl": "en", "gl": "US",
                                        **({"visitorData": vis.group(1)} if vis else {})}}, "continuation": token}
         st, resp = post("https://www.youtube.com/youtubei/v1/browse?prettyPrint=false", body)
         if not isinstance(resp, dict):
-            print(f"page {page}: HTTP {st}: {resp}"); break
+            if page % 5 == 1 or not token: print(f"page {page}: HTTP {st}: {resp}"); break
         rr = renderers(resp, [])
         total += len(rr)
-        token = None
-        find_cir(resp)
-        print(f"page {page}: HTTP {st} keys={list(resp.keys())[:6]} renderers={ {k: rr.count(k) for k in set(rr)} } next={bool(token)} total={total}")
+        token = app_token(resp)
+        if page % 5 == 1 or not token: print(f"page {page}: HTTP {st} keys={list(resp.keys())[:6]} renderers={ {k: rr.count(k) for k in set(rr)} } next={bool(token)} total={total}")
 
 cid = "UCDoiP7u4X3i_FWrNbi_6wZA"
 for handle in ["@UnTioBlancoHetero", "@untioblancohetero"]:

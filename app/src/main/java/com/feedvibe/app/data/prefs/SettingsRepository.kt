@@ -80,6 +80,8 @@ data class AppSettings(
     val channelGridSize: Int = 104,
     val channelGrid: Boolean = true,
     val showChannelNames: Boolean = true,
+    /** Orden de los episodios: false = más recientes primero, true = más antiguos primero. */
+    val oldestFirst: Boolean = false,
 )
 
 class SettingsRepository(private val context: Context) {
@@ -107,6 +109,7 @@ class SettingsRepository(private val context: Context) {
         val channelGridSize = intPreferencesKey("channel_grid_size")
         val channelGrid = booleanPreferencesKey("channel_grid")
         val showChannelNames = booleanPreferencesKey("show_channel_names")
+        val oldestFirst = booleanPreferencesKey("oldest_first")
 
         val lastRefresh = longPreferencesKey("last_refresh")
         val lastBackup = longPreferencesKey("last_backup")
@@ -146,6 +149,7 @@ class SettingsRepository(private val context: Context) {
             channelGridSize = p[K.channelGridSize] ?: d.channelGridSize,
             channelGrid = p[K.channelGrid] ?: d.channelGrid,
             showChannelNames = p[K.showChannelNames] ?: d.showChannelNames,
+            oldestFirst = p[K.oldestFirst] ?: d.oldestFirst,
         )
     }
 
@@ -179,6 +183,7 @@ class SettingsRepository(private val context: Context) {
             p[K.channelGridSize] = n.channelGridSize
             p[K.channelGrid] = n.channelGrid
             p[K.showChannelNames] = n.showChannelNames
+            p[K.oldestFirst] = n.oldestFirst
         }
     }
 

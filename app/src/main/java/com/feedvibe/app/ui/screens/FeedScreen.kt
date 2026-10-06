@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
@@ -87,13 +88,13 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
 
     val subCategory = remember(subs) { subs.associate { it.subscription.id to it.subscription.category } }
     val presentTypes = remember(subs) { subs.map { it.subscription.type }.distinct().sortedBy { it.ordinal } }
-    val visible = remember(all, typeFilter, categoryFilter, query, settings.hideWatched) {
+    val visible = remember(all, typeFilter, categoryFilter, query, settings.hideWatched, settings.oldestFirst) {
         all.filter { item ->
             (!settings.hideWatched || !item.watched) &&
                 (typeFilter == null || item.sourceType.name == typeFilter) &&
                 (categoryFilter == null || subCategory[item.episode.subscriptionId] == categoryFilter) &&
                 (query.isBlank() || item.episode.title.contains(query, true) || item.channelTitle.contains(query, true))
-        }
+        }.let { if (settings.oldestFirst) it.asReversed() else it }
     }
     val callbacks = rememberEpisodeCallbacks(nav)
     val selection = rememberSelectionState()
@@ -149,6 +150,14 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                         onClick = {
                             menu = false
                             scope.launch { container.settings.update { it.copy(hideWatched = !it.hideWatched) } }
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (settings.oldestFirst) "Más recientes primero" else "Más antiguos primero") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, null) },
+                        onClick = {
+                            menu = false
+                            scope.launch { container.settings.update { it.copy(oldestFirst = !it.oldestFirst) } }
                         },
                     )
                     DropdownMenuItem(

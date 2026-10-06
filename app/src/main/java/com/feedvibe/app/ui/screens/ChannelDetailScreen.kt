@@ -2,6 +2,9 @@ package com.feedvibe.app.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -94,7 +97,8 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
     val callbacks = rememberEpisodeCallbacks(nav, allowOpenChannel = false)
     val s = sub
 
-    val visible = if (onlyUnwatched) episodes.filter { !it.watched } else episodes
+    val filtered = if (onlyUnwatched) episodes.filter { !it.watched } else episodes
+    val visible = if (settings.oldestFirst) filtered.asReversed() else filtered
     val selection = rememberSelectionState()
     selection.order = visible.map { it.episode.id }
     val unwatched = episodes.count { !it.watched }
@@ -209,9 +213,15 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
                                 )
                             }
                             Spacer(Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                 FilterChip(selected = !onlyUnwatched, onClick = { onlyUnwatched = false }, label = { Text("Todos") })
                                 FilterChip(selected = onlyUnwatched, onClick = { onlyUnwatched = true }, label = { Text("Sin ver ($unwatched)") })
+                                Spacer(Modifier.weight(1f))
+                                AssistChip(
+                                    onClick = { scope.launch { container.settings.update { it.copy(oldestFirst = !it.oldestFirst) } } },
+                                    label = { Text(if (settings.oldestFirst) "Antiguos primero" else "Recientes primero") },
+                                    leadingIcon = { Icon(if (settings.oldestFirst) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward, null) },
+                                )
                             }
                         }
                     }
