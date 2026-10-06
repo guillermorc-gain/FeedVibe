@@ -11,6 +11,7 @@ import com.feedvibe.app.data.sources.ParsedEpisode
 import com.feedvibe.app.data.sources.ParsedFeed
 import com.feedvibe.app.data.sources.SourceException
 import com.feedvibe.app.data.sources.YouTubeApi
+import com.feedvibe.app.data.sources.YouTubePage
 import com.feedvibe.app.data.sources.SourceResolver
 import com.feedvibe.app.data.sources.SourceType
 import com.feedvibe.app.data.sync.CloudSync
@@ -32,9 +33,6 @@ import java.util.concurrent.atomic.AtomicInteger
 data class NewEpisodes(val subscription: SubscriptionEntity, val episodes: List<EpisodeEntity>)
 
 data class RefreshResult(val newEpisodes: List<NewEpisodes>, val errors: Int)
-
-/** No hay clave de la API de YouTube configurada. */
-class MissingApiKeyException : Exception("Falta la clave de la API de YouTube")
 
 class FeedRepository(
     private val db: AppDatabase,
@@ -229,14 +227,16 @@ class FeedRepository(
             val sub = db.subscriptions().get(subId) ?: throw SourceException("Canal no encontrado")
             if (!canLoadFullHistory(sub)) throw SourceException("Esta plataforma ya muestra todos los episodios disponibles en su feed")
             val apiKey = youtubeApiKey()
-            if (apiKey.isBlank()) throw MissingApiKeyException()
             if (subId in _historyProgress.value) return@withContext 0
             _historyProgress.update { it + (subId to 0) }
             val episodes = try {
-                YouTubeApi.fetchAll(apiKey, sub.sourceKey, settings.current().hideShorts) { n ->
+                val progress: (Int) -> Unit = { n ->
                     _historyProgress.update { it + (subId to n) }
                     onProgress(n)
                 }
+                // Con clave: API oficial (fechas exactas y duraciones). Sin clave: la página del canal.
+                if (apiKey.isNotBlank()) YouTubeApi.fetchAll(apiKey, sub.sourceKey, settings.current().hideShorts, onProgress = progress)
+                else YouTubePage.fetchAll(sub.sourceKey, onProgress = progress)
             } finally {
                 _historyProgress.update { it - subId }
             }

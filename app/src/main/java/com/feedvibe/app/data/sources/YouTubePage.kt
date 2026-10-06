@@ -4,7 +4,10 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 
 /**
  * Plan B sin clave de API: lee la pestaña «Vídeos» del canal (o la página de la lista)
@@ -12,19 +15,61 @@ import kotlinx.serialization.json.contentOrNull
  * Se usa cuando el feed RSS de YouTube falla (devuelve 404/500 con frecuencia).
  */
 object YouTubePage {
-    private val relative = Regex("""(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago""", RegexOption.IGNORE_CASE)
+    private val relativeEn = Regex("""(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago""", RegexOption.IGNORE_CASE)
+    private val relativeEs = Regex("""hace\s+(\d+)\s+(segundo|minuto|hora|día|dia|semana|mes|año|ano)""", RegexOption.IGNORE_CASE)
     private val durationText = Regex("""^\d{1,2}(:\d{2}){1,2}$""")
 
-    suspend fun fetch(key: String): ParsedFeed {
+    private val ENGLISH = mapOf("Accept-Language" to "en-US,en;q=0.9")
+
+    suspend fun fetch(key: String): ParsedFeed = fetchPages(key, limit = 0) {}
+
+    /**
+     * Todos los vídeos del canal sin clave de API: la página «Vídeos» carga más al hacer
+     * scroll mediante "continuaciones"; aquí se piden una tras otra hasta llegar al primero.
+     */
+    suspend fun fetchAll(key: String, limit: Int = 5000, onProgress: (Int) -> Unit): List<ParsedEpisode> =
+        fetchPages(key, limit, onProgress).episodes
+
+    private suspend fun fetchPages(key: String, limit: Int, onProgress: (Int) -> Unit): ParsedFeed {
         val (kind, id) = key.split(':', limit = 2).let { it[0] to it.getOrElse(1) { "" } }
         // hl=en: fechas relativas en inglés ("2 days ago"), fáciles de interpretar.
         val url = if (kind == "playlist") "https://www.youtube.com/playlist?list=$id&hl=en&gl=US"
         else "https://www.youtube.com/channel/$id/videos?hl=en&gl=US"
-        val html = Http.get(url).body
+        val html = Http.get(url, ENGLISH).body
         val data = extractInitialData(html) ?: throw SourceException("No se pudo leer la página del canal de YouTube")
 
         val renderers = mutableListOf<Pair<String, JsonObject>>()
         collect(data, renderers)
+        var token = lastContinuation(data)
+        if (limit > 0) {
+            onProgress(renderers.size)
+            val clientVersion = Regex(""""INNERTUBE_CLIENT_VERSION":"([^"]+)"""").find(html)?.groupValues?.get(1)
+                ?: "2.20250101.00.00"
+            var pages = 0
+            while (renderers.size < limit && pages < 300) {
+                val t = token ?: break
+                val body = buildJsonObject {
+                    putJsonObject("context") {
+                        putJsonObject("client") {
+                            put("clientName", "WEB")
+                            put("clientVersion", clientVersion)
+                            put("hl", "en")
+                            put("gl", "US")
+                        }
+                    }
+                    put("continuation", t)
+                }.toString()
+                val page = AppJson.parseToJsonElement(
+                    Http.postJson("https://www.youtube.com/youtubei/v1/browse?prettyPrint=false", body, ENGLISH)
+                )
+                val before = renderers.size
+                collect(page, renderers)
+                token = lastContinuation(page)
+                pages++
+                onProgress(renderers.size)
+                if (renderers.size == before) break
+            }
+        }
         val now = System.currentTimeMillis()
         val seen = HashSet<String>()
         val episodes = renderers.mapIndexedNotNull { index, (type, r) ->
@@ -59,6 +104,25 @@ object YouTubePage {
             siteUrl = if (kind == "playlist") "https://www.youtube.com/playlist?list=$id" else "https://www.youtube.com/channel/$id",
             episodes = episodes,
         )
+    }
+
+    /** Token para pedir la siguiente tanda de vídeos (el último que aparece en la respuesta). */
+    private fun lastContinuation(el: JsonElement): String? {
+        var found: String? = null
+        fun walk(e: JsonElement) {
+            when (e) {
+                is JsonObject -> {
+                    e["continuationItemRenderer"]?.let { c ->
+                        c.obj("continuationEndpoint").obj("continuationCommand").str("token")?.let { found = it }
+                    }
+                    e.values.forEach(::walk)
+                }
+                is JsonArray -> e.forEach(::walk)
+                else -> Unit
+            }
+        }
+        walk(el)
+        return found
     }
 
     private fun extractInitialData(html: String): JsonElement? {
@@ -117,15 +181,17 @@ object YouTubePage {
     }
 
     private fun parseRelative(s: String): Long? {
-        val m = relative.find(s) ?: return null
+        val en = relativeEn.find(s)
+        val es = if (en == null) relativeEs.find(s) else null
+        val m = en ?: es ?: return null
         val n = m.groupValues[1].toLong()
         val unit = when (m.groupValues[2].lowercase()) {
-            "second" -> 1_000L
-            "minute" -> 60_000L
-            "hour" -> 3_600_000L
-            "day" -> 86_400_000L
-            "week" -> 7 * 86_400_000L
-            "month" -> 30 * 86_400_000L
+            "second", "segundo" -> 1_000L
+            "minute", "minuto" -> 60_000L
+            "hour", "hora" -> 3_600_000L
+            "day", "día", "dia" -> 86_400_000L
+            "week", "semana" -> 7 * 86_400_000L
+            "month", "mes" -> 30 * 86_400_000L
             else -> 365 * 86_400_000L
         }
         return System.currentTimeMillis() - n * unit

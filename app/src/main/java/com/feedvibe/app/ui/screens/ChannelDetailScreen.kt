@@ -6,7 +6,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
-import com.feedvibe.app.data.repo.MissingApiKeyException
 import com.feedvibe.app.ui.Routes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -90,7 +89,6 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
     var confirmDelete by remember { mutableStateOf(false) }
     var editCategory by remember { mutableStateOf(false) }
     var askFullHistory by remember { mutableStateOf(false) }
-    var missingKey by remember { mutableStateOf(false) }
     val historyProgress by feeds.historyProgress.collectAsStateWithLifecycle()
     val loadingHistory = historyProgress[subId]
     val callbacks = rememberEpisodeCallbacks(nav, allowOpenChannel = false)
@@ -248,7 +246,7 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
             title = { Text("Cargar todos los vídeos") },
             text = {
                 Column {
-                    Text("Se descargará la lista completa de vídeos del canal desde YouTube. En canales muy grandes puede tardar un poco.")
+                    Text("Se descargará la lista completa de vídeos del canal desde YouTube. En canales con muchos vídeos puede tardar uno o dos minutos.")
                     Spacer(Modifier.height(12.dp))
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { markOld = !markOld }) {
                         Checkbox(checked = markOld, onCheckedChange = { markOld = it })
@@ -264,8 +262,6 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
                         try {
                             val n = feeds.loadFullHistory(subId, markOld)
                             snackbar.showSnackbar(if (n == 0) "No había vídeos nuevos" else "Añadidos $n vídeos")
-                        } catch (e: MissingApiKeyException) {
-                            missingKey = true
                         } catch (e: Exception) {
                             snackbar.showSnackbar(e.message ?: "No se pudo cargar el historial")
                         }
@@ -273,23 +269,6 @@ fun ChannelDetailScreen(nav: NavController, settings: AppSettings, subId: String
                 }) { Text("Cargar") }
             },
             dismissButton = { TextButton(onClick = { askFullHistory = false }) { Text("Cancelar") } },
-        )
-    }
-
-    if (missingKey) {
-        AlertDialog(
-            onDismissRequest = { missingKey = false },
-            title = { Text("Falta la clave de YouTube") },
-            text = {
-                Text(
-                    "El RSS de YouTube solo da los 15 últimos vídeos. Para ver todos hace falta una clave gratuita " +
-                        "de la API de YouTube. Añádela en Perfil → Reproducción → YouTube (allí se explica cómo conseguirla)."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { missingKey = false; nav.navigate(Routes.PLAYBACK) }) { Text("Configurar") }
-            },
-            dismissButton = { TextButton(onClick = { missingKey = false }) { Text("Ahora no") } },
         )
     }
 

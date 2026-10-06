@@ -14,7 +14,7 @@ no has visto, los marcas como vistos y todo se **sincroniza al instante entre tu
 | | |
 |---|---|
 | **Fuentes** | YouTube (canal, @handle, vídeo o lista), Twitch (directos + vídeos), Dailymotion, Vimeo, Odysee, podcasts (buscador de Apple Podcasts) y cualquier web/blog con RSS/Atom (detecta el feed sola) |
-| **Canal entero de YouTube** | Además de los 15 últimos del RSS, botón **«Cargar todos»** para listar todos los vídeos del canal (YouTube Data API) |
+| **Canal entero de YouTube** | Además de los últimos del RSS, botón **«Cargar todos»** para listar todos los vídeos del canal, sin clave (o con la YouTube Data API si añades una clave) |
 | **Novedades** | Episodios sin ver con filtros por plataforma y categoría, búsqueda y *pull to refresh* |
 | **Selección múltiple** | Pulsación larga en un episodio o canal; toque para añadir, pulsación larga en otro para seleccionar el rango. Marcar vistos/no vistos, ver más tarde, favoritos, compartir, seleccionar todo/arriba/abajo… En canales: marcar todo visto, categoría, notificaciones, dejar de seguir |
 | **Canales** | Cuadrícula de logos con tamaño ajustable (barra de zoom o pellizcando con dos dedos), con o sin nombres; orden por nombre A→Z / Z→A, sin ver, recientes, plataforma |
@@ -55,8 +55,10 @@ Sin este paso la app funciona igual, pero solo en local.
 
 ## Ver todos los vídeos de un canal de YouTube
 
-El RSS público de YouTube solo da los **15 vídeos más recientes**. Para listar el canal entero FeedVibe usa la
-**YouTube Data API v3** (gratis, 10.000 unidades/día; cargar 1.000 vídeos gasta unas 40):
+El RSS público de YouTube solo da los **15 vídeos más recientes**. **«Cargar todos»** funciona sin clave: lee la
+pestaña «Vídeos» del canal y va pidiendo más páginas hasta el primer vídeo (las fechas antiguas son aproximadas,
+"hace 2 años"). Opcionalmente puedes usar la **YouTube Data API v3** para fechas exactas y duraciones
+(gratis, 10.000 unidades/día; cargar 1.000 vídeos gasta unas 40):
 
 1. <https://console.cloud.google.com/apis/library/youtube.googleapis.com> → **Habilitar** (vale el proyecto de Firebase).
 2. *Credenciales* → *Crear credenciales* → **Clave de API** (recomendado: restringirla a "YouTube Data API v3").

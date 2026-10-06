@@ -84,7 +84,6 @@ fun AddFeedScreen(nav: NavController, initialUrl: String?) {
     var preview by remember { mutableStateOf<FeedRepository.Preview?>(null) }
     var markOld by rememberSaveable { mutableStateOf(true) }
     var loadAll by rememberSaveable { mutableStateOf(true) }
-    val hasYouTubeKey by produceState(false) { value = container.feeds.youtubeApiKey().isNotBlank() }
     var category by rememberSaveable { mutableStateOf("") }
     var results by remember { mutableStateOf<List<PodcastSearch.Result>>(emptyList()) }
 
@@ -188,22 +187,13 @@ fun AddFeedScreen(nav: NavController, initialUrl: String?) {
                                     Checkbox(checked = markOld, onCheckedChange = { markOld = it })
                                     Text("Marcar como vistos los episodios ya publicados")
                                 }
-                                if (p.type == SourceType.YOUTUBE && !hasYouTubeKey) {
-                                    Text(
-                                        "Solo se verán los ${p.feed.episodes.size} vídeos más recientes. Para cargar el canal entero, " +
-                                            "añade una clave de YouTube en Perfil → Reproducción.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(vertical = 6.dp),
-                                    )
-                                }
-                                if (p.type == SourceType.YOUTUBE && hasYouTubeKey) {
+                                if (p.type == SourceType.YOUTUBE) {
                                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { loadAll = !loadAll }) {
                                         Checkbox(checked = loadAll, onCheckedChange = { loadAll = it })
                                         Column {
                                             Text("Cargar todos los vídeos del canal")
                                             Text(
-                                                "Si no, solo los ${p.feed.episodes.size} más recientes",
+                                                "Si no, solo los ${p.feed.episodes.size} más recientes. En canales grandes tarda un poco.",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
@@ -221,7 +211,7 @@ fun AddFeedScreen(nav: NavController, initialUrl: String?) {
                                         scope.launch {
                                             runCatching { container.feeds.subscribe(p, markOld, category) }
                                                 .onSuccess { sub ->
-                                                    if (loadAll && hasYouTubeKey && p.type == SourceType.YOUTUBE) {
+                                                    if (loadAll && p.type == SourceType.YOUTUBE) {
                                                         // Sigue en segundo plano; el canal muestra el progreso.
                                                         val mark = markOld
                                                         container.appScope.launch {

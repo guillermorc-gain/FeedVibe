@@ -391,12 +391,12 @@ private fun YouTubeKeySection(settings: AppSettings) {
     var checking by remember { mutableStateOf(false) }
     val builtIn = BuildConfig.YOUTUBE_API_KEY.isNotBlank()
 
-    SectionTitle("YouTube: todos los vídeos del canal")
+    SectionTitle("YouTube: clave de API (opcional)")
     SettingsGroup {
         Column(Modifier.padding(16.dp)) {
             Text(
-                "YouTube solo publica los 15 últimos vídeos de cada canal en su RSS. Con una clave gratuita de la " +
-                    "API de YouTube, FeedVibe puede cargar el canal entero (botón «Cargar todos» en cada canal).",
+                "No hace falta: «Cargar todos» funciona sin clave leyendo la página del canal. Con una clave gratuita " +
+                    "de la API de YouTube la carga usa el servicio oficial, con fechas exactas y duraciones de todos los vídeos.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
