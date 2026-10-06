@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val container = (application as FeedVibeApp).container
         handleIntent(intent)
+        com.feedvibe.app.update.UpdatedReceiver.clear(this)
 
         lifecycleScope.launch {
             val s = container.settings.current()

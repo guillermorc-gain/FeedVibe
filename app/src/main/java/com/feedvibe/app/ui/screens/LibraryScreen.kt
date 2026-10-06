@@ -1,6 +1,14 @@
 package com.feedvibe.app.ui.screens
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.UnfoldLess
+import androidx.compose.material.icons.filled.UnfoldMore
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -63,8 +71,14 @@ fun LibraryScreen(nav: NavController, settings: AppSettings) {
         "Aquí verás lo último que has marcado como visto.",
     )
 
+    // Grupos (canales) contraídos en cada pestaña: "pestaña|canal".
+    var collapsed by rememberSaveable { mutableStateOf(setOf<String>()) }
+    fun groupKey(subId: String) = "$tab|$subId"
+
     val selection = rememberSelectionState()
     val current = tabs[tab].third
+    val groupIds = current.map { it.episode.subscriptionId }.distinct()
+    val allCollapsed = groupIds.isNotEmpty() && groupIds.all { groupKey(it) in collapsed }
     selection.order = current.groupBy { it.episode.subscriptionId }.values.flatten().map { it.episode.id }
 
     ScreenScaffold(
@@ -73,6 +87,19 @@ fun LibraryScreen(nav: NavController, settings: AppSettings) {
         topBarOverride = if (selection.active) {
             { EpisodeSelectionBar(selection, current) }
         } else null,
+        actions = {
+            if (groupIds.size > 1) {
+                IconButton(onClick = {
+                    val keys = groupIds.map(::groupKey).toSet()
+                    collapsed = if (allCollapsed) collapsed - keys else collapsed + keys
+                }) {
+                    Icon(
+                        if (allCollapsed) Icons.Filled.UnfoldMore else Icons.Filled.UnfoldLess,
+                        if (allCollapsed) "Desplegar todos" else "Contraer todos",
+                    )
+                }
+            }
+        },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Text(
@@ -97,9 +124,15 @@ fun LibraryScreen(nav: NavController, settings: AppSettings) {
                 // Agrupados por canal, en el orden en que aparece cada canal.
                 list.groupBy { it.episode.subscriptionId }.forEach { (subId, group) ->
                     val first = group.first()
+                    val key = groupKey(subId)
+                    val isCollapsed = key in collapsed
                     item(key = "h-$subId") {
+                        val arrow by animateFloatAsState(if (isCollapsed) -90f else 0f, label = "flecha")
                         Row(
-                            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { collapsed = if (isCollapsed) collapsed - key else collapsed + key }
+                                .padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             ChannelAvatar(first.channelImage, first.channelTitle, 28.dp)
@@ -111,9 +144,15 @@ fun LibraryScreen(nav: NavController, settings: AppSettings) {
                                 modifier = Modifier.weight(1f),
                             )
                             Text("${group.size}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Icon(
+                                Icons.Filled.ExpandMore,
+                                if (isCollapsed) "Desplegar" else "Contraer",
+                                Modifier.padding(start = 4.dp).rotate(arrow),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
-                    items(group, key = { it.episode.id }) {
+                    if (!isCollapsed) items(group, key = { it.episode.id }) {
                         EpisodeRow(it, settings.listStyle, callbacks, showChannel = false, selection = selection, swipeEnabled = settings.swipeToMark)
                     }
                 }
