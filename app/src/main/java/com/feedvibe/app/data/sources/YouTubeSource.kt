@@ -55,12 +55,11 @@ object YouTubeSource {
     }
 
     suspend fun fetch(key: String, hideShorts: Boolean, fetchChannelInfo: Boolean): ParsedFeed {
-        val feed = try {
-            RssSource.fetch(feedUrl(key, hideShorts), SourceType.YOUTUBE)
-        } catch (e: SourceException) {
-            if (!hideShorts) throw e
-            RssSource.fetch(feedUrl(key, false), SourceType.YOUTUBE)
-        }
+        val feed = fetchRssWithFallbacks(key, hideShorts)
+            ?: runCatching { YouTubePage.fetch(key) }.getOrNull()?.takeIf { it.episodes.isNotEmpty() }
+            ?: throw SourceException(
+                "YouTube no está respondiendo con la lista de vídeos de este canal. Prueba otra vez en unos minutos."
+            )
         val id = key.substringAfter(':')
         val site = if (key.startsWith("playlist:")) "https://www.youtube.com/playlist?list=$id"
         else "https://www.youtube.com/channel/$id"
@@ -77,13 +76,39 @@ object YouTubeSource {
             type = SourceType.YOUTUBE,
             sourceKey = key,
             title = title,
-            imageUrl = image,
+            imageUrl = image ?: feed.imageUrl,
             siteUrl = site,
             episodes = feed.episodes.map { ep ->
                 // Los Shorts publicados aparecen con enlace /shorts/ en algunos feeds.
                 ep.copy(url = ep.url.ifBlank { "https://www.youtube.com/watch?v=${ep.guid}" })
             },
         )
+    }
+
+    /**
+     * El RSS de YouTube devuelve 404/500 a menudo aunque el canal exista: se prueba la
+     * lista de subidas (UU…) y el feed del canal, con un reintento cada uno.
+     */
+    private suspend fun fetchRssWithFallbacks(key: String, hideShorts: Boolean): ParsedFeed? {
+        val id = key.substringAfter(':')
+        val urls = buildList {
+            add(feedUrl(key, hideShorts))
+            if (key.startsWith("channel:")) {
+                add("https://www.youtube.com/feeds/videos.xml?playlist_id=UU${id.removePrefix("UC")}")
+                add(feedUrl(key, false))
+            }
+        }.distinct()
+        for (url in urls) {
+            repeat(2) { attempt ->
+                try {
+                    val feed = RssSource.fetch(url, SourceType.YOUTUBE)
+                    if (feed.episodes.isNotEmpty() || url == urls.last()) return feed
+                } catch (e: SourceException) {
+                    if (attempt == 0) kotlinx.coroutines.delay(700)
+                }
+            }
+        }
+        return null
     }
 
     fun videoIdFromUrl(url: String): String? {
