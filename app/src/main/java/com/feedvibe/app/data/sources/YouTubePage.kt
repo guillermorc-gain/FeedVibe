@@ -65,6 +65,7 @@ object YouTubePage {
             onProgress(renderers.size)
             val clientVersion = Regex(""""INNERTUBE_CLIENT_VERSION":"([^"]+)"""").find(html)?.groupValues?.get(1)
                 ?: "2.20250101.00.00"
+            val visitorData = Regex(""""VISITOR_DATA":"([^"]+)"""").find(html)?.groupValues?.get(1)
             var pages = 0
             while (renderers.size < limit && pages < 300) {
                 val t = token ?: break
@@ -75,13 +76,18 @@ object YouTubePage {
                             put("clientVersion", clientVersion)
                             put("hl", "en")
                             put("gl", "US")
+                            if (visitorData != null) put("visitorData", visitorData)
                         }
                     }
                     put("continuation", t)
                 }.toString()
-                val page = AppJson.parseToJsonElement(
-                    Http.postJson("https://www.youtube.com/youtubei/v1/browse?prettyPrint=false", body, ENGLISH)
-                )
+                // Si una página falla se reintenta una vez; si vuelve a fallar nos quedamos con lo cargado.
+                val page = runCatching {
+                    AppJson.parseToJsonElement(Http.postJson("https://www.youtube.com/youtubei/v1/browse?prettyPrint=false", body, ENGLISH))
+                }.recoverCatching {
+                    kotlinx.coroutines.delay(1500)
+                    AppJson.parseToJsonElement(Http.postJson("https://www.youtube.com/youtubei/v1/browse?prettyPrint=false", body, ENGLISH))
+                }.getOrNull() ?: break
                 val before = renderers.size
                 collect(page, renderers)
                 token = lastContinuation(page)
@@ -126,15 +132,30 @@ object YouTubePage {
         )
     }
 
-    /** Token para pedir la siguiente tanda de vídeos (el último que aparece en la respuesta). */
+    /**
+     * Token para pedir la siguiente tanda de vídeos (el último que aparece en la respuesta).
+     * YouTube lo pone en sitios distintos según la página: directamente en
+     * continuationEndpoint.continuationCommand, dentro de commandExecutorCommand.commands[…]
+     * (listas de reproducción) o en el formato antiguo nextContinuationData.
+     */
     private fun lastContinuation(el: JsonElement): String? {
         var found: String? = null
+        fun tokenInside(e: JsonElement): String? {
+            when (e) {
+                is JsonObject -> {
+                    e.obj("continuationCommand").str("token")?.let { return it }
+                    for (v in e.values) tokenInside(v)?.let { return it }
+                }
+                is JsonArray -> for (v in e) tokenInside(v)?.let { return it }
+                else -> Unit
+            }
+            return null
+        }
         fun walk(e: JsonElement) {
             when (e) {
                 is JsonObject -> {
-                    e["continuationItemRenderer"]?.let { c ->
-                        c.obj("continuationEndpoint").obj("continuationCommand").str("token")?.let { found = it }
-                    }
+                    e["continuationItemRenderer"]?.let { c -> tokenInside(c)?.let { found = it } }
+                    e.obj("nextContinuationData").str("continuation")?.let { found = it }
                     e.values.forEach(::walk)
                 }
                 is JsonArray -> e.forEach(::walk)
