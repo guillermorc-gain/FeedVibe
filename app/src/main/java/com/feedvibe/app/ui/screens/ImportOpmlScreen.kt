@@ -140,7 +140,7 @@ fun ImportOpmlScreen(nav: NavController) {
                 Spacer(Modifier.height(16.dp))
                 Text(it, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { nav.navigateTab(Routes.CHANNELS) }) { Text("Ver mis canales") }
+                OutlinedButton(onClick = { (nav as? androidx.navigation.NavHostController)?.navigateTab(Routes.CHANNELS) ?: nav.navigate(Routes.CHANNELS) }) { Text("Ver mis canales") }
             }
         }
     }
