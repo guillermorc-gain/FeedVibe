@@ -64,6 +64,7 @@ import androidx.navigation.navArgument
 import com.feedvibe.app.ExternalRequest
 import com.feedvibe.app.data.prefs.AppSettings
 import com.feedvibe.app.ui.screens.AboutScreen
+import com.feedvibe.app.ui.screens.YouTubePlayerScreen
 import com.feedvibe.app.ui.screens.AddFeedScreen
 import com.feedvibe.app.ui.screens.AppearanceScreen
 import com.feedvibe.app.ui.screens.BackupScreen
@@ -89,6 +90,7 @@ object Routes {
     const val CHANNEL = "channel/{id}"
     const val ADD = "add?url={url}"
     const val PLAYER = "player/{id}"
+    const val YOUTUBE = "youtube/{id}"
     const val APPEARANCE = "settings/appearance"
     const val SYNC = "settings/sync"
     const val BACKUP = "settings/backup"
@@ -100,6 +102,7 @@ object Routes {
     fun channel(id: String) = "channel/$id"
     fun add(url: String? = null) = if (url == null) "add" else "add?url=${Uri.encode(url)}"
     fun player(id: String) = "player/$id"
+    fun youtube(id: String) = "youtube/$id"
 }
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
@@ -153,6 +156,9 @@ fun AppRoot(settings: AppSettings, external: ExternalRequest?, onExternalHandled
         }
         composable(Routes.PLAYER, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
             Detail { PlayerScreen(nav, it.arguments?.getString("id").orEmpty()) }
+        }
+        composable(Routes.YOUTUBE, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
+            Detail { YouTubePlayerScreen(nav, it.arguments?.getString("id").orEmpty()) }
         }
         composable(Routes.APPEARANCE) { Detail { AppearanceScreen(nav, settings) } }
         composable(Routes.SYNC) { Detail { SyncScreen(nav, settings) } }

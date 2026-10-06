@@ -115,7 +115,7 @@ class FeedRepository(
             )
             db.subscriptions().upsert(sub)
             val episodes = toEntities(sub, feed)
-            db.episodes().upsertAll(episodes)
+            saveEpisodes(episodes)
             cloud.pushSubscription(sub)
             if (markExistingWatched) setWatched(episodes.map { it.id }, true)
             sub
@@ -176,7 +176,7 @@ class FeedRepository(
             val existing = db.episodes().idsForSubscription(sub.id).toHashSet()
             val entities = toEntities(sub, feed)
             // Los episodios que desaparecen del feed (YouTube solo da los 15 últimos) se conservan.
-            db.episodes().upsertAll(entities)
+            saveEpisodes(entities)
             val firstRefresh = sub.lastRefreshed == 0L
             val newOnes = entities.filter { it.id !in existing }
             val updatedSub = sub.copy(
@@ -268,7 +268,7 @@ class FeedRepository(
             }
             val existing = db.episodes().idsForSubscription(sub.id).toHashSet()
             val entities = toEntities(sub, episodes)
-            db.episodes().upsertAll(entities)
+            saveEpisodes(entities)
             val newIds = entities.map { it.id }.filter { it !in existing }
             if (markOldWatched) setWatched(newIds, true)
             if (!sub.fullHistory) {
@@ -279,6 +279,18 @@ class FeedRepository(
             }
             newIds.size
         }
+
+    /** Guarda episodios sin perder la duración que ya se conocía si el feed no la trae (el RSS de YouTube no la da). */
+    private suspend fun saveEpisodes(episodes: List<EpisodeEntity>) {
+        val missing = episodes.filter { it.durationSec <= 0 }.map { it.id }
+        val known = missing.chunked(500).flatMap { db.episodes().knownDurations(it) }.associate { it.id to it.durationSec }
+        db.episodes().upsertAll(episodes.map { e -> known[e.id]?.let { e.copy(durationSec = it) } ?: e })
+    }
+
+    /** El reproductor averigua la duración de los vídeos que no la traían. */
+    suspend fun setDurationIfUnknown(id: String, sec: Long) {
+        if (sec > 0) db.episodes().setDurationIfUnknown(id, sec)
+    }
 
     // ---------- Estado de episodios ----------
 

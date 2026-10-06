@@ -64,7 +64,6 @@ data class AppSettings(
     val refreshOnOpen: Boolean = true,
     val notificationsEnabled: Boolean = true,
     val notifyLive: Boolean = true,
-    val autoMarkOnOpen: Boolean = true,
     val openMode: OpenMode = OpenMode.EXTERNAL,
     val hideShorts: Boolean = false,
     val hideWatched: Boolean = true,
@@ -108,7 +107,6 @@ class SettingsRepository(private val context: Context) {
         val refreshOnOpen = booleanPreferencesKey("refresh_on_open")
         val notifications = booleanPreferencesKey("notifications")
         val notifyLive = booleanPreferencesKey("notify_live")
-        val autoMark = booleanPreferencesKey("auto_mark")
         val openMode = stringPreferencesKey("open_mode")
         val hideShorts = booleanPreferencesKey("hide_shorts")
         val hideWatched = booleanPreferencesKey("hide_watched")
@@ -155,7 +153,6 @@ class SettingsRepository(private val context: Context) {
             refreshOnOpen = p[K.refreshOnOpen] ?: d.refreshOnOpen,
             notificationsEnabled = p[K.notifications] ?: d.notificationsEnabled,
             notifyLive = p[K.notifyLive] ?: d.notifyLive,
-            autoMarkOnOpen = p[K.autoMark] ?: d.autoMarkOnOpen,
             openMode = p.enum(K.openMode, d.openMode),
             hideShorts = p[K.hideShorts] ?: d.hideShorts,
             hideWatched = p[K.hideWatched] ?: d.hideWatched,
@@ -195,7 +192,6 @@ class SettingsRepository(private val context: Context) {
             p[K.refreshOnOpen] = n.refreshOnOpen
             p[K.notifications] = n.notificationsEnabled
             p[K.notifyLive] = n.notifyLive
-            p[K.autoMark] = n.autoMarkOnOpen
             p[K.openMode] = n.openMode.name
             p[K.hideShorts] = n.hideShorts
             p[K.hideWatched] = n.hideWatched
