@@ -122,6 +122,13 @@ object HomeTabs {
 fun AppRoot(settings: AppSettings, external: ExternalRequest?, onExternalHandled: () -> Unit) {
     val container = LocalContainer.current
     val nav = rememberNavController()
+    androidx.compose.runtime.DisposableEffect(nav) {
+        val l = androidx.navigation.NavController.OnDestinationChangedListener { _, d, _ ->
+            com.feedvibe.app.CrashReport.note("Pantalla ${d.route}")
+        }
+        nav.addOnDestinationChangedListener(l)
+        onDispose { nav.removeOnDestinationChangedListener(l) }
+    }
     val context = LocalContext.current
 
     // Permiso de notificaciones (Android 13+): avisos de episodios nuevos y número en el icono.
@@ -186,6 +193,7 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
     val start = remember { val half = Int.MAX_VALUE / 2; half - half % tabs.size }
     val pager = rememberPagerState(initialPage = start) { Int.MAX_VALUE }
     val current = Math.floorMod(pager.currentPage, tabs.size)
+    LaunchedEffect(current) { com.feedvibe.app.CrashReport.note("Pestaña $current") }
 
     fun goTo(index: Int) {
         var diff = index - current

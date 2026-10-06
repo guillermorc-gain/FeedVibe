@@ -202,6 +202,7 @@ class FeedRepository(
     suspend fun refreshAll(onlyIds: Set<String>? = null): RefreshResult = withContext(Dispatchers.IO) {
         refreshMutex.withLock {
             _refreshing.value = true
+            com.feedvibe.app.CrashReport.note("Actualizando ${onlyIds?.size ?: "todos los"} canales")
             try {
                 val hideShorts = settings.current().hideShorts
                 // Los canales en pausa no se actualizan (salvo que se pida uno concreto).
@@ -226,6 +227,7 @@ class FeedRepository(
                     val unseen = n.episodes.filter { states[it.id]?.watched != true }
                     if (unseen.isEmpty()) null else n.copy(episodes = unseen)
                 }
+                com.feedvibe.app.CrashReport.note("Actualización terminada (${errors.get()} errores)")
                 RefreshResult(filtered, errors.get())
             } finally {
                 _refreshing.value = false
@@ -257,6 +259,7 @@ class FeedRepository(
             val apiKey = youtubeApiKey()
             if (subId in _historyProgress.value) return@withContext 0
             _historyProgress.update { it + (subId to 0) }
+            com.feedvibe.app.CrashReport.note("Cargando todos los vídeos de ${sub.title}")
             val episodes = try {
                 val progress: (Int) -> Unit = { n ->
                     _historyProgress.update { it + (subId to n) }
@@ -286,6 +289,7 @@ class FeedRepository(
                 }
             }
             markHistoryWatched(sub.id, toMark.map { it.id })
+            com.feedvibe.app.CrashReport.note("${sub.title}: ${entities.size} vídeos, ${newIds.size} nuevos, ${toMark.size} marcados")
             if (!sub.fullHistory) {
                 // Se sincroniza: el resto de dispositivos cargarán también el historial.
                 val updated = (db.subscriptions().get(sub.id) ?: sub).copy(fullHistory = true, updatedAt = System.currentTimeMillis())
@@ -309,6 +313,7 @@ class FeedRepository(
      * anterior añadió como «sin ver» al cargar el historial completo.
      */
     suspend fun repairOldUnwatched() = withContext(Dispatchers.IO) {
+        com.feedvibe.app.CrashReport.note("Reparando vistos")
         for (sub in db.subscriptions().getAll()) {
             val episodes = db.episodes().forSubscription(sub.id)
             val states = episodes.map { it.id }.chunked(500).flatMap { db.states().getMany(it) }.associateBy { it.episodeId }

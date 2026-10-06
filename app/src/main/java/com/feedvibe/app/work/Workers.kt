@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val c = (applicationContext as FeedVibeApp).container
+        com.feedvibe.app.CrashReport.note("Actualización en segundo plano")
         c.ensureSyncStarted()
         // Primero traemos lo marcado en otros dispositivos para no avisar de algo ya visto.
         c.cloud.pullOnce()
