@@ -46,7 +46,7 @@ class AppContainer(val context: Context) {
             appScope.launch { runCatching { feeds.refreshOne(sub.id) } }
         }
         cloud.onRemoteFullHistory = { sub ->
-            appScope.launch { runCatching { feeds.loadFullHistory(sub.id, markOldWatched = false) } }
+            appScope.launch { runCatching { feeds.loadFullHistory(sub.id, markOldWatched = false, auto = true) } }
         }
         cloud.onRemoteProfile = { nick, photo, stamp ->
             appScope.launch { profile.applyRemote(nick, photo, stamp) }
@@ -63,17 +63,21 @@ class AppContainer(val context: Context) {
 
     /**
      * Tareas al abrir la app:
+     * - Reparar una vez los vídeos antiguos que entraron como «sin ver».
      * - Cargar todos los vídeos de los canales de YouTube que solo tienen los últimos (importados…).
-     *   Una vez se recargan también los ya cargados (títulos en español y marca de Shorts).
      * - Mantener el número de episodios sin ver en el icono de la app.
      */
     fun startBackgroundJobs() {
         if (backgroundStarted) return
         backgroundStarted = true
         appScope.launch {
-            val reloadAll = !settings.backfillDone()
-            feeds.backfillFullHistory(includeAlreadyLoaded = reloadAll)
-            if (reloadAll) settings.setBackfillDone()
+            if (!settings.repairWatchedDone()) {
+                runCatching { feeds.repairOldUnwatched() }
+                settings.setRepairWatchedDone()
+            }
+            // Solo los canales que aún no tienen todos sus vídeos: los ya cargados no se vuelven
+            // a pedir en cada arranque (con muchos canales la app se quedaba atascada).
+            feeds.backfillFullHistory(includeAlreadyLoaded = false)
         }
         appScope.launch {
             combine(feeds.unwatchedCount, settings.settings.map { it.iconBadge }) { n, on -> if (on) n else 0 }

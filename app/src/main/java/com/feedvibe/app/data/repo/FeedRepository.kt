@@ -190,7 +190,7 @@ class FeedRepository(
             db.subscriptions().upsert(updatedSub)
             // Canal con historial completo que este dispositivo aún no tiene (restaurado, otro móvil…).
             if (sub.fullHistory && existing.isEmpty()) {
-                runCatching { loadFullHistory(sub.id, markOldWatched = false) }
+                runCatching { loadFullHistory(sub.id, markOldWatched = false, auto = true) }
             }
             if (firstRefresh || newOnes.isEmpty()) null else NewEpisodes(updatedSub, newOnes)
         } catch (e: Exception) {
@@ -246,9 +246,11 @@ class FeedRepository(
     /**
      * Carga todos los vídeos del canal (no solo los 15 del RSS).
      * @param markOldWatched marca como vistos los vídeos que no se conocían.
+     * @param auto carga automática (al abrir la app, desde otro dispositivo): los vídeos más
+     *   antiguos que todo lo ya conocido del canal se marcan como vistos.
      * @return número de vídeos nuevos añadidos.
      */
-    suspend fun loadFullHistory(subId: String, markOldWatched: Boolean, onProgress: (Int) -> Unit = {}): Int =
+    suspend fun loadFullHistory(subId: String, markOldWatched: Boolean, auto: Boolean = false, onProgress: (Int) -> Unit = {}): Int =
         withContext(Dispatchers.IO) {
             val sub = db.subscriptions().get(subId) ?: throw SourceException("Canal no encontrado")
             if (!canLoadFullHistory(sub)) throw SourceException("Esta plataforma ya muestra todos los episodios disponibles en su feed")
@@ -266,18 +268,24 @@ class FeedRepository(
             } finally {
                 _historyProgress.update { it - subId }
             }
-            val existing = db.episodes().idsForSubscription(sub.id).toHashSet()
+            val known = db.episodes().forSubscription(sub.id)
+            val existing = known.map { it.id }.toHashSet()
+            val oldestKnown = known.minOfOrNull { it.publishedAt }
             val entities = toEntities(sub, episodes)
             db.episodes().upsertAll(entities)
             val newOnes = entities.filter { it.id !in existing }
             val newIds = newOnes.map { it.id }
-            if (markOldWatched) setWatched(newIds, true)
-            else {
-                // Los vídeos antiguos que aparecen ahora no deben salir como nuevos si ya habías
-                // marcado como visto algo posterior del canal (p. ej. «marcar canal como visto»).
+            val toMark = if (markOldWatched) newOnes else {
+                // Los vídeos antiguos que aparecen ahora no salen como nuevos si ya habías marcado
+                // como visto algo posterior del canal, ni (en la carga automática) si son anteriores
+                // a todo lo que ya conocías del canal.
                 val until = watchedUntil(sub.id)
-                if (until != null) setWatched(newOnes.filter { it.publishedAt <= until }.map { it.id }, true)
+                newOnes.filter {
+                    (until != null && it.publishedAt <= until) ||
+                        (auto && oldestKnown != null && it.publishedAt < oldestKnown)
+                }
             }
+            markHistoryWatched(sub.id, toMark.map { it.id })
             if (!sub.fullHistory) {
                 // Se sincroniza: el resto de dispositivos cargarán también el historial.
                 val updated = (db.subscriptions().get(sub.id) ?: sub).copy(fullHistory = true, updatedAt = System.currentTimeMillis())
@@ -295,6 +303,35 @@ class FeedRepository(
         return episodes.filter { it.id in watched }.maxOfOrNull { it.publishedAt }
     }
 
+    /**
+     * Reparación (una vez): en cada canal, los episodios que nunca has tocado y son anteriores al
+     * último que marcaste como visto pasan a vistos. Arregla los vídeos antiguos que una versión
+     * anterior añadió como «sin ver» al cargar el historial completo.
+     */
+    suspend fun repairOldUnwatched() = withContext(Dispatchers.IO) {
+        for (sub in db.subscriptions().getAll()) {
+            val episodes = db.episodes().forSubscription(sub.id)
+            val states = episodes.map { it.id }.chunked(500).flatMap { db.states().getMany(it) }.associateBy { it.episodeId }
+            val until = episodes.filter { states[it.id]?.watched == true }.maxOfOrNull { it.publishedAt } ?: continue
+            markHistoryWatched(sub.id, episodes.filter { it.publishedAt <= until && it.id !in states }.map { it.id })
+        }
+    }
+
+    /**
+     * Marca como vistos vídeos antiguos del historial solo en este dispositivo: pueden ser miles y
+     * no se suben a la nube (cada dispositivo aplica la misma regla al cargar el historial).
+     * Con updatedAt = 1 cualquier cambio real, de aquí o de otro dispositivo, tiene prioridad.
+     */
+    private suspend fun markHistoryWatched(subId: String, ids: List<String>) {
+        if (ids.isEmpty()) return
+        val existing = ids.chunked(500).flatMap { db.states().getMany(it) }.associateBy { it.episodeId }
+        val states = ids.filter { existing[it]?.watched != true }.map { id ->
+            (existing[id] ?: EpisodeStateEntity(episodeId = id, subscriptionId = subId))
+                .copy(watched = true, watchedAt = 0, positionMs = 0, watchLater = false, updatedAt = 1)
+        }
+        states.chunked(500).forEach { db.states().upsertAll(it) }
+    }
+
     // ---------- Estado de episodios ----------
 
     private suspend fun updateStates(ids: List<String>, change: (EpisodeStateEntity) -> EpisodeStateEntity) {
@@ -302,7 +339,9 @@ class FeedRepository(
         val now = System.currentTimeMillis()
         val existing = ids.chunked(500).flatMap { db.states().getMany(it) }.associateBy { it.episodeId }
         val subIds = ids.mapNotNull { id -> existing[id]?.subscriptionId?.let { id to it } }.toMap().toMutableMap()
-        ids.filter { it !in subIds }.forEach { id -> db.episodes().getItem(id)?.let { subIds[id] = it.episode.subscriptionId } }
+        ids.filter { it !in subIds }.chunked(500).forEach { chunk ->
+            db.episodes().subscriptionIds(chunk).forEach { subIds[it.id] = it.subscriptionId }
+        }
         val updated = ids.map { id ->
             val base = existing[id] ?: EpisodeStateEntity(episodeId = id, subscriptionId = subIds[id], updatedAt = 0)
             change(base).copy(updatedAt = now, subscriptionId = base.subscriptionId ?: subIds[id])
@@ -356,8 +395,8 @@ class FeedRepository(
     suspend fun setPaused(subIds: Collection<String>, paused: Boolean) = updateSubscriptions(subIds) { it.copy(paused = paused) }
 
     /** Carga el historial completo de varios canales, uno detrás de otro. */
-    suspend fun loadFullHistoryMany(subIds: Collection<String>, markOldWatched: Boolean) {
-        for (id in subIds) runCatching { loadFullHistory(id, markOldWatched) }
+    suspend fun loadFullHistoryMany(subIds: Collection<String>, markOldWatched: Boolean, auto: Boolean = false) {
+        for (id in subIds) runCatching { loadFullHistory(id, markOldWatched, auto) }
     }
 
     /**
@@ -367,7 +406,7 @@ class FeedRepository(
     suspend fun backfillFullHistory(includeAlreadyLoaded: Boolean) {
         val subs = db.subscriptions().getAll()
             .filter { it.type == SourceType.YOUTUBE && !it.paused && (includeAlreadyLoaded || !it.fullHistory) }
-        loadFullHistoryMany(subs.map { it.id }, markOldWatched = false)
+        loadFullHistoryMany(subs.map { it.id }, markOldWatched = false, auto = true)
     }
 
     suspend fun markSubscriptionsWatched(subIds: Collection<String>) = subIds.forEach { markAllWatched(it) }

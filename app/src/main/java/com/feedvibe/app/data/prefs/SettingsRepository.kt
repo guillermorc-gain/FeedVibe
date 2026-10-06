@@ -128,6 +128,7 @@ class SettingsRepository(private val context: Context) {
         val iconBadge = booleanPreferencesKey("icon_badge")
         val feedCardWidth = intPreferencesKey("feed_card_width")
         val backfillV2 = booleanPreferencesKey("backfill_v2_done")
+        val repairWatchedV1 = booleanPreferencesKey("repair_watched_v1_done")
         val channelsOnlyUnwatched = booleanPreferencesKey("channels_only_unwatched")
 
         val lastRefresh = longPreferencesKey("last_refresh")
@@ -240,6 +241,8 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun backfillDone(): Boolean = context.dataStore.data.first()[K.backfillV2] ?: false
     suspend fun setBackfillDone() = context.dataStore.edit { it[K.backfillV2] = true }
+    suspend fun repairWatchedDone(): Boolean = context.dataStore.data.first()[K.repairWatchedV1] ?: false
+    suspend fun setRepairWatchedDone() = context.dataStore.edit { it[K.repairWatchedV1] = true }
 
     val onboardingDone: Flow<Boolean> = context.dataStore.data.map { it[K.onboardingDone] ?: false }
     suspend fun setOnboardingDone() = context.dataStore.edit { it[K.onboardingDone] = true }
