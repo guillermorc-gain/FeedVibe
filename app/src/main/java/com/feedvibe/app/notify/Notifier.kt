@@ -27,8 +27,8 @@ class Notifier(private val context: Context) {
         const val CHANNEL_EPISODES = "episodes"
         const val CHANNEL_LIVE = "live"
         const val CHANNEL_SYSTEM = "system"
-        const val CHANNEL_BADGE = "badge_min"
-        private const val OLD_CHANNEL_BADGE = "badge"
+        const val CHANNEL_BADGE = "badge_count"
+        private val OLD_BADGE_CHANNELS = listOf("badge", "badge_min")
         private const val BADGE_ID = 4100
         private const val GROUP = "com.feedvibe.NEW_EPISODES"
         const val EXTRA_EPISODE_ID = "episode_id"
@@ -47,7 +47,6 @@ class Notifier(private val context: Context) {
                     .apply { description = "Cuando un canal empieza un directo" },
                 NotificationChannel(CHANNEL_SYSTEM, "Copias y actualizaciones", NotificationManager.IMPORTANCE_LOW),
                 NotificationChannel(CHANNEL_BADGE, "Contador de episodios sin ver", NotificationManager.IMPORTANCE_MIN).apply {
-                    lockscreenVisibility = android.app.Notification.VISIBILITY_SECRET
                     description = "Muestra el número de episodios sin ver en el icono de la app"
                     setShowBadge(true)
                     setSound(null, null)
@@ -56,7 +55,7 @@ class Notifier(private val context: Context) {
             )
         )
         // Canal anterior del contador: los ajustes de un canal no se pueden cambiar una vez creado.
-        nm.deleteNotificationChannel(OLD_CHANNEL_BADGE)
+        OLD_BADGE_CHANNELS.forEach { nm.deleteNotificationChannel(it) }
     }
 
     private fun canPost(): Boolean =
@@ -156,8 +155,8 @@ class Notifier(private val context: Context) {
     /**
      * Número en el icono de la app. Android no deja poner un número directamente: los launchers
      * (Samsung, Xiaomi…) lo toman del número de una notificación. Se usa una notificación
-     * silenciosa y mínima con setNumber (sin texto, sin icono en la barra de estado y oculta en la
-     * pantalla de bloqueo); con 0 se quita.
+     * silenciosa y mínima (sin icono en la barra de estado) con setNumber; con 0 se quita.
+     * Sin texto o como «secreta», Samsung puede no mostrar el número.
      */
     @SuppressLint("MissingPermission")
     fun updateBadge(count: Int) {
@@ -167,15 +166,13 @@ class Notifier(private val context: Context) {
         } else {
             val n = NotificationCompat.Builder(context, CHANNEL_BADGE)
                 .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("$count sin ver")
                 .setNumber(count)
                 .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .setSilent(true)
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false)
-                .setVisibility(NotificationCompat.VISIBILITY_SECRET)
-                .setCategory(NotificationCompat.CATEGORY_STATUS)
-                .setLocalOnly(true)
                 .setContentIntent(openAppIntent(BADGE_ID))
                 .build()
             runCatching { nm.notify(BADGE_ID, n) }
