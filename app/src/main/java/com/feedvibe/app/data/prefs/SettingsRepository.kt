@@ -82,6 +82,8 @@ data class AppSettings(
     val showChannelNames: Boolean = true,
     /** Orden de los episodios: false = más recientes primero, true = más antiguos primero. */
     val oldestFirst: Boolean = false,
+    /** Pantalla Canales: mostrar solo los que tienen episodios sin ver. */
+    val channelsOnlyUnwatched: Boolean = true,
 )
 
 class SettingsRepository(private val context: Context) {
@@ -110,6 +112,7 @@ class SettingsRepository(private val context: Context) {
         val channelGrid = booleanPreferencesKey("channel_grid")
         val showChannelNames = booleanPreferencesKey("show_channel_names")
         val oldestFirst = booleanPreferencesKey("oldest_first")
+        val channelsOnlyUnwatched = booleanPreferencesKey("channels_only_unwatched")
 
         val lastRefresh = longPreferencesKey("last_refresh")
         val lastBackup = longPreferencesKey("last_backup")
@@ -150,6 +153,7 @@ class SettingsRepository(private val context: Context) {
             channelGrid = p[K.channelGrid] ?: d.channelGrid,
             showChannelNames = p[K.showChannelNames] ?: d.showChannelNames,
             oldestFirst = p[K.oldestFirst] ?: d.oldestFirst,
+            channelsOnlyUnwatched = p[K.channelsOnlyUnwatched] ?: d.channelsOnlyUnwatched,
         )
     }
 
@@ -184,6 +188,7 @@ class SettingsRepository(private val context: Context) {
             p[K.channelGrid] = n.channelGrid
             p[K.showChannelNames] = n.showChannelNames
             p[K.oldestFirst] = n.oldestFirst
+            p[K.channelsOnlyUnwatched] = n.channelsOnlyUnwatched
         }
     }
 

@@ -5,6 +5,7 @@ import com.feedvibe.app.data.prefs.AppSettings
 import com.feedvibe.app.data.prefs.SettingsRepository
 import com.feedvibe.app.data.repo.FeedRepository
 import com.feedvibe.app.data.sources.AppJson
+import com.feedvibe.app.data.sources.SourceResolver
 import com.feedvibe.app.data.sources.SourceType
 import com.feedvibe.app.data.sources.XmlNode
 import kotlinx.serialization.Serializable
@@ -108,31 +109,78 @@ class BackupManager(
         else -> key
     }
 
-    suspend fun importOpml(xml: String): Int {
+    data class OpmlEntry(val title: String, val url: String?, val category: String?, val fvType: String?, val fvKey: String?, val htmlUrl: String?)
+
+    data class ImportResult(val added: List<String>, val alreadyHad: Int, val failed: List<String>)
+
+    /** Lee las entradas de un OPML (Podcast Addict, AntennaPod, Feedly, FeedVibe…). */
+    fun parseOpml(xml: String): List<OpmlEntry> {
         val root = XmlNode.parse(xml)
-        val outlines = mutableListOf<Pair<XmlNode, String?>>()
+        val out = mutableListOf<OpmlEntry>()
         fun walk(n: XmlNode, category: String?) {
             n.all("outline").forEach { o ->
-                if (o.attr("xmlUrl") != null || o.attr("feedvibeKey") != null) outlines += o to (o.attr("category") ?: category)
-                else walk(o, o.attr("text") ?: o.attr("title"))
+                val url = o.attr("xmlUrl") ?: o.attr("xmlurl") ?: o.attr("url")
+                if (url != null || o.attr("feedvibeKey") != null) {
+                    out += OpmlEntry(
+                        title = o.attr("title") ?: o.attr("text") ?: url ?: "",
+                        url = url,
+                        category = o.attr("category")?.takeIf { it.isNotBlank() } ?: category,
+                        fvType = o.attr("feedvibeType"),
+                        fvKey = o.attr("feedvibeKey"),
+                        htmlUrl = o.attr("htmlUrl"),
+                    )
+                } else {
+                    walk(o, o.attr("text") ?: o.attr("title"))
+                }
             }
         }
-        root.find("body")?.let { walk(it, null) }
-        var count = 0
-        for ((o, cat) in outlines) {
-            val fvType = o.attr("feedvibeType")
-            val fvKey = o.attr("feedvibeKey")
-            val title = o.attr("title") ?: o.attr("text") ?: continue
-            val (type, key) = if (fvType != null && fvKey != null) {
-                SourceType.fromName(fvType) to fvKey
-            } else {
-                val url = o.attr("xmlUrl") ?: continue
-                val yt = Regex("channel_id=(UC[\\w-]{22})").find(url)?.groupValues?.get(1)
-                if (yt != null) SourceType.YOUTUBE to "channel:$yt" else SourceType.RSS to url
-            }
-            repo.importSubscription(type, key, title, null, o.attr("htmlUrl"), cat, true, false)
-            count++
+        (root.find("body") ?: root).let { walk(it, null) }
+        return out.distinctBy { it.fvKey ?: it.url }
+    }
+
+    /** Convierte la URL de un OPML en el tipo de fuente y clave que usa FeedVibe (sin red si es posible). */
+    private suspend fun toSource(e: OpmlEntry): Pair<SourceType, String> {
+        if (e.fvType != null && e.fvKey != null) return SourceType.fromName(e.fvType) to e.fvKey
+        val url = e.url?.trim() ?: error("sin URL")
+        val lower = url.lowercase()
+        Regex("channel_id=(UC[\\w-]{22})").find(url)?.let { return SourceType.YOUTUBE to "channel:${it.groupValues[1]}" }
+        Regex("playlist_id=([\\w-]+)").find(url)?.let {
+            val pl = it.groupValues[1]
+            // La lista de subidas UU… de un canal se guarda como el propio canal.
+            return SourceType.YOUTUBE to (if (pl.startsWith("UU") && pl.length == 24) "channel:UC${pl.drop(2)}" else "playlist:$pl")
         }
-        return count
+        Regex("youtube\\.com/channel/(UC[\\w-]{22})").find(url)?.let { return SourceType.YOUTUBE to "channel:${it.groupValues[1]}" }
+        Regex("videos\\.xml\\?user=([\\w.-]+)").find(url)?.let {
+            val r = SourceResolver.resolve("https://www.youtube.com/user/${it.groupValues[1]}")
+            return r.type to r.key
+        }
+        val isPlatform = listOf("youtube.com", "youtu.be", "twitch.tv", "dailymotion.com", "vimeo.com", "odysee.com", "podcasts.apple.com")
+            .any { lower.contains(it) } && !lower.contains("/rss") && !lower.contains("/feeds/")
+        if (isPlatform) {
+            val r = SourceResolver.resolve(url)
+            return r.type to r.key
+        }
+        return SourceType.PODCAST to url
+    }
+
+    /**
+     * Importa todas las suscripciones de un OPML de golpe.
+     * @param onProgress (hechos, total)
+     */
+    suspend fun importOpml(xml: String, onProgress: (Int, Int) -> Unit = { _, _ -> }): ImportResult {
+        val entries = parseOpml(xml)
+        if (entries.isEmpty()) throw IllegalArgumentException("El archivo no contiene canales")
+        val added = mutableListOf<String>()
+        val failed = mutableListOf<String>()
+        var already = 0
+        entries.forEachIndexed { i, e ->
+            runCatching {
+                val (type, key) = toSource(e)
+                val id = repo.importSubscription(type, key, e.title, null, e.htmlUrl, e.category, true, false)
+                if (id != null) added += id else already++
+            }.onFailure { failed += e.title }
+            onProgress(i + 1, entries.size)
+        }
+        return ImportResult(added, already, failed)
     }
 }

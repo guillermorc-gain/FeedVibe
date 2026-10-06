@@ -266,6 +266,11 @@ fun AddFeedScreen(nav: NavController, initialUrl: String?) {
                 }
                 item {
                     Spacer(Modifier.height(12.dp))
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { nav.navigate(Routes.IMPORT_OPML) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Importar todos desde Podcast Addict (OPML)") }
+                    Spacer(Modifier.height(12.dp))
                     Text(
                         "Consejo: desde YouTube, Twitch o el navegador usa «Compartir» → FeedVibe para añadir el canal directamente.",
                         style = MaterialTheme.typography.bodySmall,

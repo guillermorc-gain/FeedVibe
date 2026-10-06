@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -49,6 +50,7 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -134,8 +136,12 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
     fun saveSize() = scope.launch { container.settings.update { it.copy(channelGridSize = size.toInt()) } }
 
     val collator = remember { Collator.getInstance(Locale("es")).apply { strength = Collator.PRIMARY } }
-    val filtered = remember(subs, query, isAddress) {
-        if (query.isBlank() || isAddress) subs else subs.filter { it.subscription.title.contains(query.trim(), ignoreCase = true) }
+    val onlyUnwatched = settings.channelsOnlyUnwatched
+    val withNew = remember(subs) { subs.count { it.unwatchedCount > 0 } }
+    val filtered = remember(subs, query, isAddress, onlyUnwatched) {
+        val searched = if (query.isBlank() || isAddress) subs else subs.filter { it.subscription.title.contains(query.trim(), ignoreCase = true) }
+        // Al buscar se muestran todos, aunque estén al día.
+        if (onlyUnwatched && query.isBlank()) searched.filter { it.unwatchedCount > 0 } else searched
     }
     val sorted = remember(filtered, sort) {
         val byName = compareBy<SubscriptionWithCount, String>(collator) { it.subscription.title }
@@ -196,6 +202,11 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
                         )
                     }
                     DropdownMenuItem(
+                        text = { Text("Importar OPML (Podcast Addict…)") },
+                        leadingIcon = { Icon(Icons.Filled.FileOpen, null) },
+                        onClick = { sortMenu = false; nav.navigate(Routes.IMPORT_OPML) },
+                    )
+                    DropdownMenuItem(
                         text = { Text(if (grid) "Ver como lista" else "Ver como cuadrícula") },
                         leadingIcon = { Icon(if (grid) Icons.Filled.ViewList else Icons.Filled.GridView, null) },
                         onClick = {
@@ -222,6 +233,23 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
                     onShowNames = { v -> scope.launch { container.settings.update { it.copy(showChannelNames = v) } } },
                 )
             }
+            if (subs.isNotEmpty() && !searching) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = onlyUnwatched,
+                        onClick = { scope.launch { container.settings.update { it.copy(channelsOnlyUnwatched = true) } } },
+                        label = { Text("Con episodios sin ver ($withNew)") },
+                    )
+                    FilterChip(
+                        selected = !onlyUnwatched,
+                        onClick = { scope.launch { container.settings.update { it.copy(channelsOnlyUnwatched = false) } } },
+                        label = { Text("Todos (${subs.size})") },
+                    )
+                }
+            }
             if (isAddress) {
                 AddFromSearchCard(query) {
                     nav.navigate(Routes.add(query.trim()))
@@ -234,7 +262,23 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
                     Icons.Filled.Subscriptions,
                     "Sin canales",
                     "Pulsa la lupa y pega la dirección de un canal de YouTube, Twitch, Dailymotion, Vimeo, Odysee, un podcast o una web con RSS.",
-                ) { Button(onClick = { nav.navigate(Routes.add()) }) { Text("Añadir canal") } }
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Button(onClick = { nav.navigate(Routes.add()) }) { Text("Añadir canal") }
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = { nav.navigate(Routes.IMPORT_OPML) }) { Text("Importar desde Podcast Addict (OPML)") }
+                    }
+                }
+            } else if (sorted.isEmpty() && onlyUnwatched && query.isBlank()) {
+                EmptyState(
+                    Icons.Filled.DoneAll,
+                    "¡Estás al día!",
+                    "Ningún canal tiene episodios sin ver.",
+                ) {
+                    Button(onClick = { scope.launch { container.settings.update { it.copy(channelsOnlyUnwatched = false) } } }) {
+                        Text("Ver todos los canales")
+                    }
+                }
             } else {
                 LazyVerticalGrid(
                     columns = if (grid) GridCells.Adaptive(size.dp) else GridCells.Fixed(1),

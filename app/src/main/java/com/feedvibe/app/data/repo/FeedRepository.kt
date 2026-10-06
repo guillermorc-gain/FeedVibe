@@ -110,16 +110,17 @@ class FeedRepository(
         cloud.pushSubscriptionDeleted(subId, System.currentTimeMillis())
     }
 
-    /** Usado al restaurar copias de seguridad / importar OPML. */
-    suspend fun importSubscription(type: SourceType, key: String, title: String, imageUrl: String?, siteUrl: String?, category: String?, notify: Boolean, fullHistory: Boolean) {
+    /** Usado al restaurar copias de seguridad / importar OPML. Devuelve el id si es nueva. */
+    suspend fun importSubscription(type: SourceType, key: String, title: String, imageUrl: String?, siteUrl: String?, category: String?, notify: Boolean, fullHistory: Boolean): String? {
         val id = Ids.subscription(type, key)
-        if (db.subscriptions().get(id) != null) return
+        if (db.subscriptions().get(id) != null) return null
         val sub = SubscriptionEntity(
             id = id, type = type, sourceKey = key, title = title, imageUrl = imageUrl,
             siteUrl = siteUrl, category = category, notify = notify, fullHistory = fullHistory,
         )
         db.subscriptions().upsert(sub)
         cloud.pushSubscription(sub)
+        return id
     }
 
     // ---------- Actualización de feeds ----------

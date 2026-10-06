@@ -167,7 +167,7 @@ fun BackupScreen(nav: NavController, settings: AppSettings) {
                 val text = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }
                 container.backup.importOpml(text ?: error("Archivo vacío"))
             }.onSuccess {
-                message = "Importados $it canales"
+                message = "Importados ${it.added.size} canales"
                 container.appScope.launch { container.feeds.refreshAll() }
             }.onFailure { message = "OPML no válido: ${it.message}" }
         }
@@ -257,7 +257,7 @@ fun BackupScreen(nav: NavController, settings: AppSettings) {
         SectionTitle("OPML (otras apps de podcasts/RSS)")
         SettingsGroup {
             ActionRow(Icons.Filled.RssFeed, "Exportar OPML", "Lista de canales para Podcast Addict, Feedly…") { exportOpml.launch("feedvibe.opml") }
-            ActionRow(Icons.Filled.RssFeed, "Importar OPML", "Trae tus suscripciones desde otra app") { importOpml.launch(arrayOf("*/*")) }
+            ActionRow(Icons.Filled.RssFeed, "Importar OPML", "Trae tus suscripciones de Podcast Addict u otra app") { nav.navigate(com.feedvibe.app.ui.Routes.IMPORT_OPML) }
         }
     }
 

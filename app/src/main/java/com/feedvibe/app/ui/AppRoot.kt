@@ -54,6 +54,7 @@ import com.feedvibe.app.ui.screens.BackupScreen
 import com.feedvibe.app.ui.screens.ChannelDetailScreen
 import com.feedvibe.app.ui.screens.ChannelsScreen
 import com.feedvibe.app.ui.screens.FeedScreen
+import com.feedvibe.app.ui.screens.ImportOpmlScreen
 import com.feedvibe.app.ui.screens.LibraryScreen
 import com.feedvibe.app.ui.screens.NotificationsScreen
 import com.feedvibe.app.ui.screens.PlaybackScreen
@@ -77,6 +78,7 @@ object Routes {
     const val NOTIFICATIONS = "settings/notifications"
     const val PLAYBACK = "settings/playback"
     const val ABOUT = "settings/about"
+    const val IMPORT_OPML = "import/opml"
 
     fun channel(id: String) = "channel/$id"
     fun add(url: String? = null) = if (url == null) "add" else "add?url=${Uri.encode(url)}"
@@ -153,6 +155,7 @@ fun AppRoot(settings: AppSettings, external: ExternalRequest?, onExternalHandled
             composable(Routes.NOTIFICATIONS) { NotificationsScreen(nav, settings) }
             composable(Routes.PLAYBACK) { PlaybackScreen(nav, settings) }
             composable(Routes.ABOUT) { AboutScreen(nav, settings) }
+            composable(Routes.IMPORT_OPML) { ImportOpmlScreen(nav) }
         }
     }
 
