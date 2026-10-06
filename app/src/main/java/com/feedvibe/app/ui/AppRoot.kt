@@ -48,6 +48,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -164,6 +165,7 @@ fun AppRoot(settings: AppSettings, external: ExternalRequest?, onExternalHandled
     }
 
     UpdateDialog()
+    CrashDialog()
 }
 
 /** Pantallas secundarias: dejan sitio a la barra de navegación del sistema. */
@@ -240,6 +242,41 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
 fun NavController.navigateTab(route: String) {
     HomeTabs.requested.value = HomeTabs.indexOf(route)
     if (!popBackStack(Routes.HOME, inclusive = false)) navigate(Routes.HOME)
+}
+
+/** Si la app se cerró sola la última vez, ofrece compartir el informe. */
+@Composable
+fun CrashDialog() {
+    val context = LocalContext.current
+    var report by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        report = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { com.feedvibe.app.CrashReport.pending(context) }.getOrNull()
+        }
+    }
+    val text = report ?: return
+    fun close() { com.feedvibe.app.CrashReport.clear(context); report = null }
+    AlertDialog(
+        onDismissRequest = { close() },
+        title = { Text("La app se cerró inesperadamente") },
+        text = {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                Text("Comparte este informe para poder arreglarlo.")
+                Spacer(Modifier.height(8.dp))
+                Text(text, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_TEXT, text)
+                context.startActivity(android.content.Intent.createChooser(send, "Compartir informe"))
+                close()
+            }) { Text("Compartir") }
+        },
+        dismissButton = { TextButton(onClick = { close() }) { Text("Cerrar") } },
+    )
 }
 
 /** Diálogo de actualización disponible / descargando (sin salir de la app). */

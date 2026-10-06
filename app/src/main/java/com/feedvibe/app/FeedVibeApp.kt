@@ -12,6 +12,7 @@ class FeedVibeApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashReport.install(this)
         container = AppContainer(this)
         container.notifier.createChannels()
         // Reprograma los trabajos periódicos cuando cambian los ajustes.

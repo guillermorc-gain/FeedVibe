@@ -64,7 +64,6 @@ class AppContainer(val context: Context) {
     /**
      * Tareas al abrir la app:
      * - Reparar una vez los vídeos antiguos que entraron como «sin ver».
-     * - Cargar todos los vídeos de los canales de YouTube que solo tienen los últimos (importados…).
      * - Mantener el número de episodios sin ver en el icono de la app.
      */
     fun startBackgroundJobs() {
@@ -75,9 +74,8 @@ class AppContainer(val context: Context) {
                 runCatching { feeds.repairOldUnwatched() }
                 settings.setRepairWatchedDone()
             }
-            // Solo los canales que aún no tienen todos sus vídeos: los ya cargados no se vuelven
-            // a pedir en cada arranque (con muchos canales la app se quedaba atascada).
-            feeds.backfillFullHistory(includeAlreadyLoaded = false)
+            // Ya no se cargan automáticamente todos los vídeos de los canales al abrir: con muchos
+            // canales la app se atascaba. Se hace al añadir un canal o desde su menú.
         }
         appScope.launch {
             combine(feeds.unwatchedCount, settings.settings.map { it.iconBadge }) { n, on -> if (on) n else 0 }
