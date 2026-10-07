@@ -141,7 +141,7 @@ class YouTubePlayerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.decorView.setBackgroundColor(Color.BLACK)
 
-        webView = WebView(this).apply {
+        webView = KeepPlayingWebView(this).apply {
             setBackgroundColor(Color.BLACK)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -516,6 +516,16 @@ class YouTubePlayerActivity : ComponentActivity() {
 
         // Sin esto algunos WebView dibujan un cartel gris encima del vídeo.
         override fun getDefaultVideoPoster(): Bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+    }
+}
+
+/**
+ * WebView que no se entera de que deja de verse (pantalla apagada, app en segundo plano):
+ * si lo supiera, el navegador marcaría la página como oculta y pausaría el vídeo.
+ */
+class KeepPlayingWebView(context: Context) : WebView(context) {
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        if (visibility != View.GONE) super.onWindowVisibilityChanged(View.VISIBLE)
     }
 }
 
