@@ -35,6 +35,9 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay as PlaylistPlayOutlined
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -162,6 +165,21 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
         actions = {
             IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
                 Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, "Buscar")
+            }
+            // Reproducción automática: al terminar un vídeo pasa solo al siguiente sin ver.
+            IconButton(onClick = {
+                val on = !settings.autoplayNext
+                scope.launch {
+                    container.settings.update { it.copy(autoplayNext = on) }
+                    snackbar.currentSnackbarData?.dismiss()
+                    snackbar.showSnackbar(if (on) "Reproducción automática activada: al terminar un vídeo empieza el siguiente" else "Reproducción automática desactivada")
+                }
+            }) {
+                Icon(
+                    if (settings.autoplayNext) Icons.AutoMirrored.Filled.PlaylistPlay else Icons.AutoMirrored.Outlined.PlaylistPlayOutlined,
+                    if (settings.autoplayNext) "Desactivar reproducción automática" else "Activar reproducción automática",
+                    tint = if (settings.autoplayNext) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                )
             }
             IconButton(onClick = { refresh() }, enabled = !refreshing) { Icon(Icons.Filled.Refresh, "Actualizar") }
             Box {

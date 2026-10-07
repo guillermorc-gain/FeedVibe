@@ -66,6 +66,8 @@ data class AppSettings(
     val notifyLive: Boolean = true,
     val openMode: OpenMode = OpenMode.EXTERNAL,
     val hideShorts: Boolean = false,
+    /** Al terminar un vídeo en el reproductor, pasar solo al siguiente sin ver. */
+    val autoplayNext: Boolean = false,
     val hideWatched: Boolean = true,
     val autoBackupDays: Int = 7,
     val backupKeep: Int = 10,
@@ -109,6 +111,7 @@ class SettingsRepository(private val context: Context) {
         val notifyLive = booleanPreferencesKey("notify_live")
         val openMode = stringPreferencesKey("open_mode")
         val hideShorts = booleanPreferencesKey("hide_shorts")
+        val autoplayNext = booleanPreferencesKey("autoplay_next")
         val hideWatched = booleanPreferencesKey("hide_watched")
         val autoBackup = intPreferencesKey("auto_backup_days")
         val backupKeep = intPreferencesKey("backup_keep")
@@ -156,6 +159,7 @@ class SettingsRepository(private val context: Context) {
             notifyLive = p[K.notifyLive] ?: d.notifyLive,
             openMode = p.enum(K.openMode, d.openMode),
             hideShorts = p[K.hideShorts] ?: d.hideShorts,
+            autoplayNext = p[K.autoplayNext] ?: d.autoplayNext,
             hideWatched = p[K.hideWatched] ?: d.hideWatched,
             autoBackupDays = p[K.autoBackup] ?: d.autoBackupDays,
             backupKeep = p[K.backupKeep] ?: d.backupKeep,
@@ -195,6 +199,7 @@ class SettingsRepository(private val context: Context) {
             p[K.notifyLive] = n.notifyLive
             p[K.openMode] = n.openMode.name
             p[K.hideShorts] = n.hideShorts
+            p[K.autoplayNext] = n.autoplayNext
             p[K.hideWatched] = n.hideWatched
             p[K.autoBackup] = n.autoBackupDays
             p[K.backupKeep] = n.backupKeep
