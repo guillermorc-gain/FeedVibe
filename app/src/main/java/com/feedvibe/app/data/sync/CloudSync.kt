@@ -55,6 +55,15 @@ class CloudSync(
 
     private fun userDoc(u: String) = firestore!!.collection("users").document(u)
 
+    /**
+     * La app está a la vista. Las escuchas en tiempo real mantienen una conexión abierta
+     * (y gastan batería), así que solo se activan mientras se usa la app; en segundo plano
+     * los cambios se envían igual y se descargan de forma puntual con [pullOnce].
+     */
+    private var foreground = false
+    /** Ya se ha comprobado la subida inicial de esta cuenta y se puede escuchar. */
+    private var ready = false
+
     @Synchronized
     fun start(newUid: String) {
         if (firestore == null || uid == newUid) return
@@ -68,7 +77,27 @@ class CloudSync(
                 runCatching { uploadAll(newUid) }.onFailure { Log.w(TAG, "uploadAll", it) }
                 settings.setSyncedUid(newUid)
             }
-            attachListeners(newUid)
+            synchronized(this@CloudSync) { if (uid == newUid) ready = true }
+            updateListeners()
+        }
+    }
+
+    fun setForeground(value: Boolean) {
+        synchronized(this) { foreground = value }
+        scope.launch { updateListeners() }
+    }
+
+    /** Engancha o suelta las escuchas en tiempo real según haya sesión y la app esté a la vista. */
+    private suspend fun updateListeners() {
+        val cursor = settings.stateCursor()
+        synchronized(this) {
+            val u = uid
+            if (u != null && ready && foreground) {
+                if (listeners.isEmpty()) attachListeners(u, cursor)
+            } else if (listeners.isNotEmpty()) {
+                listeners.forEach { it.remove() }
+                listeners.clear()
+            }
         }
     }
 
@@ -77,6 +106,7 @@ class CloudSync(
         listeners.forEach { it.remove() }
         listeners.clear()
         uid = null
+        ready = false
         _status.value = SyncStatus.OFF
     }
 
@@ -86,9 +116,8 @@ class CloudSync(
         settings.setStateCursor(0)
     }
 
-    private suspend fun attachListeners(u: String) {
+    private fun attachListeners(u: String, cursor: Long) {
         if (firestore == null) return
-        val cursor = settings.stateCursor()
         listeners += userDoc(u).collection("subscriptions").addSnapshotListener { snap, err ->
             if (err != null) { _status.value = SyncStatus.ERROR; Log.w(TAG, "subs", err); return@addSnapshotListener }
             val docs = snap?.documentChanges?.filter { it.type != DocumentChange.Type.REMOVED }?.map { it.document } ?: return@addSnapshotListener
