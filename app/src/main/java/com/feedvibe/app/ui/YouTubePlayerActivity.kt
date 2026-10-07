@@ -13,6 +13,8 @@ import android.widget.HorizontalScrollView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.feedvibe.app.MainActivity
 import kotlinx.coroutines.flow.first
 import android.content.Context
@@ -57,18 +59,46 @@ import kotlinx.coroutines.launch
  * - «Siguiente» pasa al siguiente vídeo sin ver de la cola (la lista de Novedades).
  * - Al volver atrás o salir de la app sigue en una ventana flotante (como YouTube) con
  *   pausa, siguiente y cerrar.
+ * - Con la pantalla apagada sigue sonando ([PlaybackService] + notificación de reproducción).
  */
 class YouTubePlayerActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_ID = "episodeId"
         private const val EXTRA_QUEUE = "queue"
-        private const val ACTION_PIP = "com.feedvibe.app.PIP_CONTROL"
+        private const val ACTION_CONTROL = "com.feedvibe.app.PLAYER_CONTROL"
         private const val EXTRA_CONTROL = "control"
-        private const val CONTROL_PLAY_PAUSE = 1
-        private const val CONTROL_NEXT = 2
-        private const val CONTROL_CLOSE = 3
+        const val CONTROL_PLAY_PAUSE = 1
+        const val CONTROL_NEXT = 2
+        const val CONTROL_CLOSE = 3
+        const val CONTROL_PLAY = 4
+        const val CONTROL_PAUSE = 5
         /** Se marca como visto cuando faltan estos segundos o menos. */
         private const val WATCHED_REMAINING_SEC = 30.0
+
+        /** Orden para el reproductor (desde la ventana flotante, la notificación o el bloqueo). */
+        fun controlIntent(context: Context, control: Int) =
+            Intent(ACTION_CONTROL).setPackage(context.packageName).putExtra(EXTRA_CONTROL, control)
+
+        /**
+         * Hace creer a la página (y al reproductor de YouTube, que va en otro marco) que sigue a la
+         * vista: si no, YouTube pausa el vídeo al apagar la pantalla o salir de la app.
+         */
+        private const val KEEP_VISIBLE_JS = """
+(function() {
+  try {
+    var p = Document.prototype;
+    Object.defineProperty(p, 'hidden', { get: function() { return false; }, configurable: true });
+    Object.defineProperty(p, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
+    Object.defineProperty(p, 'webkitHidden', { get: function() { return false; }, configurable: true });
+    Object.defineProperty(p, 'webkitVisibilityState', { get: function() { return 'visible'; }, configurable: true });
+    var block = function(e) { e.stopImmediatePropagation(); };
+    document.addEventListener('visibilitychange', block, true);
+    document.addEventListener('webkitvisibilitychange', block, true);
+    window.addEventListener('pagehide', block, true);
+    window.addEventListener('blur', block, true);
+  } catch (e) {}
+})();
+"""
 
         /** [queue]: episodios que siguen (en orden), para el botón «Siguiente». */
         fun intent(context: Context, episodeId: String, queue: List<String> = emptyList()) =
@@ -91,13 +121,17 @@ class YouTubePlayerActivity : ComponentActivity() {
     private var duration = 0.0
     private var playing = false
     private var ended = false
+    private var title = ""
+    private var channelTitle = ""
 
-    private val pipReceiver = object : BroadcastReceiver() {
+    private val controlReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.getIntExtra(EXTRA_CONTROL, 0)) {
                 CONTROL_PLAY_PAUSE -> js("if (player && player.getPlayerState) { if (player.getPlayerState() === 1) player.pauseVideo(); else player.playVideo(); }")
                 CONTROL_NEXT -> playNext()
                 CONTROL_CLOSE -> finish()
+                CONTROL_PLAY -> js("player && player.playVideo && player.playVideo()")
+                CONTROL_PAUSE -> js("player && player.pauseVideo && player.pauseVideo()")
             }
         }
     }
@@ -114,6 +148,9 @@ class YouTubePlayerActivity : ComponentActivity() {
             settings.mediaPlaybackRequiresUserGesture = false
             addJavascriptInterface(PlayerBridge(::onTime, ::onDuration, ::onState, ::onError, ::onPreference), "FeedVibe")
             webChromeClient = chrome
+        }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            WebViewCompat.addDocumentStartJavaScript(webView, KEEP_VISIBLE_JS, setOf("*"))
         }
         status = text(13f, Color.LTGRAY)
         details = ScrollView(this)
@@ -142,7 +179,7 @@ class YouTubePlayerActivity : ComponentActivity() {
                 }
             }
         })
-        ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(ACTION_PIP), ContextCompat.RECEIVER_NOT_EXPORTED)
+        ContextCompat.registerReceiver(this, controlReceiver, IntentFilter(ACTION_CONTROL), ContextCompat.RECEIVER_NOT_EXPORTED)
 
         // Guarda la posición cada cierto tiempo (se sincroniza entre dispositivos).
         lifecycleScope.launch {
@@ -162,7 +199,8 @@ class YouTubePlayerActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        val id = intent.getStringExtra(EXTRA_ID) ?: return finish()
+        // Sin episodio (p. ej. al tocar la notificación): solo se trae el reproductor al frente.
+        val id = intent.getStringExtra(EXTRA_ID) ?: return run { if (episodeId.isEmpty()) finish() }
         queue = intent.getStringArrayListExtra(EXTRA_QUEUE).orEmpty()
         if (id != episodeId) load(id)
     }
@@ -183,6 +221,9 @@ class YouTubePlayerActivity : ComponentActivity() {
                 openUrl(this@YouTubePlayerActivity, item.episode.url, OpenMode.EXTERNAL)
                 return@launch finish()
             }
+            title = item.episode.title
+            channelTitle = item.channelTitle
+            notifyPlayback()
             showDetails(item.episode.title, item.channelTitle, relativeTime(item.episode.publishedAt), RssSource.cleanText(item.episode.description), item.episode.url)
             status.text = if (item.watched) "Visto" else "Se marcará como visto cuando falten 30 segundos"
             val start = if (item.positionMs > 0 && !item.watched) item.positionMs / 1000 else 0L
@@ -228,8 +269,7 @@ class YouTubePlayerActivity : ComponentActivity() {
         fun action(control: Int, icon: Int, title: String) = RemoteAction(
             Icon.createWithResource(this, icon), title, title,
             PendingIntent.getBroadcast(
-                this, control,
-                Intent(ACTION_PIP).setPackage(packageName).putExtra(EXTRA_CONTROL, control),
+                this, control, controlIntent(this, control),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             ),
         )
@@ -270,9 +310,15 @@ class YouTubePlayerActivity : ComponentActivity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         // Si se cierra la ventana flotante (no se amplía), la actividad ya está parada: se cierra.
-        if (!isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-            finish()
-            return
+        if (!isInPictureInPictureMode) {
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                finish()
+                return
+            }
+            // En algunos móviles el aviso llega antes de pararse: se vuelve a comprobar en un momento.
+            window.decorView.postDelayed({
+                if (!isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) finish()
+            }, 600)
         }
         applyLayout()
     }
@@ -394,6 +440,12 @@ class YouTubePlayerActivity : ComponentActivity() {
         if (playing == value) return
         playing = value
         updatePipActions()
+        notifyPlayback()
+    }
+
+    /** Notificación de reproducción (y servicio que mantiene el vídeo con la pantalla apagada). */
+    private fun notifyPlayback() {
+        if (!isFinishing && title.isNotEmpty()) PlaybackService.update(this, title, channelTitle, playing)
     }
 
     private fun markWatched() {
@@ -420,13 +472,14 @@ class YouTubePlayerActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Pantalla apagada, ventana flotante cerrada…: se pausa y se guarda por dónde ibas.
-        js("player && player.pauseVideo && player.pauseVideo()")
+        // Con la pantalla apagada o la app en segundo plano el vídeo sigue sonando (como YouTube
+        // Premium); solo se guarda por dónde ibas.
         savePosition()
     }
 
     override fun onDestroy() {
-        runCatching { unregisterReceiver(pipReceiver) }
+        PlaybackService.stop(this)
+        runCatching { unregisterReceiver(controlReceiver) }
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("FeedVibe")
             webView.destroy()
