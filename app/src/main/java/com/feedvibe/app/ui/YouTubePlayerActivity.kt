@@ -433,7 +433,14 @@ class YouTubePlayerActivity : ComponentActivity() {
 
     private fun onState(state: Int) {
         setPlaying(state == 1)
-        if (state == 0) markWatched() else if (state == 2) savePosition()
+        if (state == 0) {
+            markWatched()
+            // Reproducción automática (se activa desde Novedades).
+            val id = episodeId
+            lifecycleScope.launch { if (container.settings.current().autoplayNext && id == episodeId) playNext() }
+        } else if (state == 2) {
+            savePosition()
+        }
     }
 
     private fun setPlaying(value: Boolean) {
