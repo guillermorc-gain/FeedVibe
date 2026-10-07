@@ -106,10 +106,22 @@ fun PlayerScreen(nav: NavController, episodeId: String) {
             player.release()
         }
     }
+    // Marca como visto cuando faltan 30 segundos o menos (y ya se ha oído al menos la mitad).
+    var markedWatched by remember { mutableStateOf(false) }
     LaunchedEffect(player) {
+        var sinceSave = 0
         while (true) {
-            delay(30_000)
-            if (player.isPlaying) container.feeds.savePosition(episodeId, player.currentPosition)
+            delay(1_000)
+            val dur = player.duration
+            val pos = player.currentPosition
+            if (!markedWatched && dur > 0 && dur - pos <= 30_000 && pos >= dur / 2) {
+                markedWatched = true
+                container.appScope.launch { container.feeds.setWatched(listOf(episodeId), true) }
+            }
+            if (++sinceSave >= 30) {
+                sinceSave = 0
+                if (player.isPlaying && !markedWatched) container.feeds.savePosition(episodeId, pos)
+            }
         }
     }
 

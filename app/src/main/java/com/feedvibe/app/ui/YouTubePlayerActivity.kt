@@ -1,6 +1,20 @@
 package com.feedvibe.app.ui
 
 import android.annotation.SuppressLint
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
+import android.util.Rational
+import android.widget.HorizontalScrollView
+import android.widget.Toast
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import com.feedvibe.app.MainActivity
+import kotlinx.coroutines.flow.first
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -38,19 +52,34 @@ import kotlinx.coroutines.launch
 /**
  * Reproductor de YouTube integrado (reproductor oficial incrustado). Va en su propia pantalla
  * clásica, sin Compose: dentro de una pantalla de Compose el vídeo se oía pero se veía en negro.
- * Guarda por dónde vas (para la barra de progreso de las listas) y marca el vídeo como visto
- * solo cuando llega al final.
+ * - Guarda por dónde vas (barra de progreso de las listas) y marca el vídeo como visto cuando
+ *   faltan 30 segundos o menos.
+ * - «Siguiente» pasa al siguiente vídeo sin ver de la cola (la lista de Novedades).
+ * - Al volver atrás o salir de la app sigue en una ventana flotante (como YouTube) con
+ *   pausa, siguiente y cerrar.
  */
 class YouTubePlayerActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_ID = "episodeId"
+        private const val EXTRA_QUEUE = "queue"
+        private const val ACTION_PIP = "com.feedvibe.app.PIP_CONTROL"
+        private const val EXTRA_CONTROL = "control"
+        private const val CONTROL_PLAY_PAUSE = 1
+        private const val CONTROL_NEXT = 2
+        private const val CONTROL_CLOSE = 3
+        /** Se marca como visto cuando faltan estos segundos o menos. */
+        private const val WATCHED_REMAINING_SEC = 30.0
 
-        fun intent(context: Context, episodeId: String) =
-            Intent(context, YouTubePlayerActivity::class.java).putExtra(EXTRA_ID, episodeId)
+        /** [queue]: episodios que siguen (en orden), para el botón «Siguiente». */
+        fun intent(context: Context, episodeId: String, queue: List<String> = emptyList()) =
+            Intent(context, YouTubePlayerActivity::class.java)
+                .putExtra(EXTRA_ID, episodeId)
+                .putStringArrayListExtra(EXTRA_QUEUE, ArrayList(queue.take(500)))
     }
 
     private val container get() = (application as FeedVibeApp).container
-    private lateinit var episodeId: String
+    private var episodeId = ""
+    private var queue: List<String> = emptyList()
     private lateinit var webView: WebView
     private lateinit var details: ScrollView
     private lateinit var status: TextView
@@ -59,13 +88,23 @@ class YouTubePlayerActivity : ComponentActivity() {
 
     // Lo que informa el reproductor (en segundos).
     private var position = 0.0
+    private var duration = 0.0
     private var playing = false
     private var ended = false
+
+    private val pipReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.getIntExtra(EXTRA_CONTROL, 0)) {
+                CONTROL_PLAY_PAUSE -> js("if (player && player.getPlayerState) { if (player.getPlayerState() === 1) player.pauseVideo(); else player.playVideo(); }")
+                CONTROL_NEXT -> playNext()
+                CONTROL_CLOSE -> finish()
+            }
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        episodeId = intent.getStringExtra(EXTRA_ID) ?: return finish()
         window.decorView.setBackgroundColor(Color.BLACK)
 
         webView = WebView(this).apply {
@@ -91,29 +130,19 @@ class YouTubePlayerActivity : ComponentActivity() {
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }
-        applyOrientation(resources.configuration.orientation)
+        applyLayout()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (fullscreenView != null) chrome.onHideCustomView() else finish()
+                when {
+                    fullscreenView != null -> chrome.onHideCustomView()
+                    // Como en YouTube: el vídeo sigue en una ventana flotante y vuelves a la app.
+                    enterPip() -> showMainScreen()
+                    else -> finish()
+                }
             }
         })
-
-        lifecycleScope.launch {
-            val item = container.feeds.getEpisode(episodeId) ?: return@launch finish()
-            val videoId = youtubeVideoId(item)?.takeIf { Regex("[A-Za-z0-9_-]{6,20}").matches(it) }
-            if (videoId == null) {
-                openUrl(this@YouTubePlayerActivity, item.episode.url, OpenMode.EXTERNAL)
-                return@launch finish()
-            }
-            showDetails(item.episode.title, item.channelTitle, relativeTime(item.episode.publishedAt), RssSource.cleanText(item.episode.description), item.episode.url)
-            status.text = if (item.watched) "Visto" else "Se marcará como visto cuando lo veas entero"
-            val start = if (item.positionMs > 0 && !item.watched) item.positionMs / 1000 else 0L
-            position = start.toDouble()
-            // YouTube exige un origen/referente identificable para los reproductores incrustados.
-            val origin = "https://$packageName"
-            webView.loadDataWithBaseURL(origin, playerHtml(videoId, start, origin, PlayerPrefs.load(this@YouTubePlayerActivity)), "text/html", "utf-8", null)
-        }
+        ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(ACTION_PIP), ContextCompat.RECEIVER_NOT_EXPORTED)
 
         // Guarda la posición cada cierto tiempo (se sincroniza entre dispositivos).
         lifecycleScope.launch {
@@ -122,18 +151,152 @@ class YouTubePlayerActivity : ComponentActivity() {
                 if (playing) savePosition()
             }
         }
+        handleIntent(intent)
     }
+
+    // El reproductor es único: abrir otro vídeo (también desde la ventana flotante) lo reutiliza.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent) {
+        val id = intent.getStringExtra(EXTRA_ID) ?: return finish()
+        queue = intent.getStringArrayListExtra(EXTRA_QUEUE).orEmpty()
+        if (id != episodeId) load(id)
+    }
+
+    /** Carga un episodio en el reproductor (continuando por donde lo dejaste). */
+    private fun load(id: String) {
+        if (episodeId.isNotEmpty()) savePosition()
+        episodeId = id
+        position = 0.0
+        duration = 0.0
+        playing = false
+        ended = false
+        lifecycleScope.launch {
+            val item = container.feeds.getEpisode(id) ?: return@launch finish()
+            if (id != episodeId) return@launch
+            val videoId = youtubeVideoId(item)?.takeIf { Regex("[A-Za-z0-9_-]{6,20}").matches(it) }
+            if (videoId == null) {
+                openUrl(this@YouTubePlayerActivity, item.episode.url, OpenMode.EXTERNAL)
+                return@launch finish()
+            }
+            showDetails(item.episode.title, item.channelTitle, relativeTime(item.episode.publishedAt), RssSource.cleanText(item.episode.description), item.episode.url)
+            status.text = if (item.watched) "Visto" else "Se marcará como visto cuando falten 30 segundos"
+            val start = if (item.positionMs > 0 && !item.watched) item.positionMs / 1000 else 0L
+            position = start.toDouble()
+            if (item.episode.durationSec > 0) duration = item.episode.durationSec.toDouble()
+            // YouTube exige un origen/referente identificable para los reproductores incrustados.
+            val origin = "https://$packageName"
+            webView.loadDataWithBaseURL(origin, playerHtml(videoId, start, origin, PlayerPrefs.load(this@YouTubePlayerActivity)), "text/html", "utf-8", null)
+        }
+    }
+
+    /**
+     * Pasa al siguiente vídeo sin ver: de la cola con la que se abrió el reproductor o, si no
+     * hay, de la lista de Novedades.
+     */
+    private fun playNext() {
+        val current = episodeId
+        lifecycleScope.launch {
+            val candidates = queue.ifEmpty {
+                container.feeds.feedEpisodes.first().filter { youtubeVideoId(it) != null }.map { it.episode.id }
+            }
+            val after = candidates.indexOf(current).let { if (it >= 0) candidates.drop(it + 1) else candidates }
+            val next = after.firstOrNull { id ->
+                id != current && container.feeds.getEpisode(id)?.let { !it.watched && youtubeVideoId(it) != null } == true
+            }
+            if (next == null) {
+                Toast.makeText(this@YouTubePlayerActivity, "No hay más vídeos sin ver", Toast.LENGTH_SHORT).show()
+            } else if (current == episodeId) {
+                load(next)
+            }
+        }
+    }
+
+    private fun js(code: String) {
+        if (::webView.isInitialized) webView.evaluateJavascript(code, null)
+    }
+
+    // ---------- Ventana flotante (imagen en imagen) ----------
+
+    private fun pipSupported() = packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+    private fun pipParams(): PictureInPictureParams {
+        fun action(control: Int, icon: Int, title: String) = RemoteAction(
+            Icon.createWithResource(this, icon), title, title,
+            PendingIntent.getBroadcast(
+                this, control,
+                Intent(ACTION_PIP).setPackage(packageName).putExtra(EXTRA_CONTROL, control),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            ),
+        )
+        return PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(16, 9))
+            .setActions(
+                listOf(
+                    if (playing) action(CONTROL_PLAY_PAUSE, android.R.drawable.ic_media_pause, "Pausa")
+                    else action(CONTROL_PLAY_PAUSE, android.R.drawable.ic_media_play, "Reproducir"),
+                    action(CONTROL_NEXT, android.R.drawable.ic_media_next, "Siguiente"),
+                    action(CONTROL_CLOSE, android.R.drawable.ic_menu_close_clear_cancel, "Cerrar"),
+                ),
+            )
+            .build()
+    }
+
+    /** Pasa a la ventana flotante. Devuelve false si el móvil no lo permite. */
+    private fun enterPip(): Boolean {
+        if (!pipSupported() || isInPictureInPictureMode) return false
+        if (fullscreenView != null) chrome.onHideCustomView()
+        return runCatching { enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
+    }
+
+    /** Vuelve a la pantalla principal de FeedVibe, debajo de la ventana flotante. */
+    private fun showMainScreen() {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+        )
+    }
+
+    // Al salir con el botón de inicio, el vídeo sigue en la ventana flotante.
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (playing) enterPip()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        // Si se cierra la ventana flotante (no se amplía), la actividad ya está parada: se cierra.
+        if (!isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            finish()
+            return
+        }
+        applyLayout()
+    }
+
+    private fun updatePipActions() {
+        if (pipSupported() && isInPictureInPictureMode) runCatching { setPictureInPictureParams(pipParams()) }
+    }
+
+    // ---------- Diseño ----------
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        applyOrientation(newConfig.orientation)
+        applyLayout()
     }
 
-    /** En vertical: vídeo 16:9 arriba y los datos debajo. En horizontal: vídeo a pantalla completa. */
-    private fun applyOrientation(orientation: Int) {
-        val landscape = orientation == Configuration.ORIENTATION_LANDSCAPE
+    /**
+     * En vertical: vídeo 16:9 arriba y los datos debajo. En horizontal o en la ventana
+     * flotante: solo el vídeo, ocupando todo.
+     */
+    private fun applyLayout() {
+        val pip = isInPictureInPictureMode
+        val onlyVideo = pip || resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val lp = webView.layoutParams as LinearLayout.LayoutParams
-        if (landscape) {
+        if (onlyVideo) {
             lp.height = 0
             lp.weight = 1f
         } else {
@@ -141,10 +304,11 @@ class YouTubePlayerActivity : ComponentActivity() {
             lp.weight = 0f
         }
         webView.layoutParams = lp
-        details.visibility = if (landscape) View.GONE else View.VISIBLE
+        details.visibility = if (onlyVideo) View.GONE else View.VISIBLE
+        if (pip) return
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        if (landscape) controller.hide(WindowInsetsCompat.Type.systemBars())
+        if (onlyVideo) controller.hide(WindowInsetsCompat.Type.systemBars())
         else controller.show(WindowInsetsCompat.Type.systemBars())
     }
 
@@ -156,25 +320,27 @@ class YouTubePlayerActivity : ComponentActivity() {
         }
         column.addView(text(20f, Color.WHITE, bold = true).apply { text = title })
         column.addView(text(14f, Color.LTGRAY).apply { text = listOf(channel, date).filter { it.isNotBlank() }.joinToString(" · ") })
+        (status.parent as? ViewGroup)?.removeView(status)
         column.addView(status.apply { setPadding(0, dp(4), 0, 0) })
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(12), 0, dp(4))
         }
-        actions.addView(button("Abrir en YouTube") { openUrl(this, url, OpenMode.EXTERNAL) })
-        actions.addView(button("Marcar como visto") {
-            ended = true
-            lifecycleScope.launch { container.feeds.setWatched(listOf(episodeId), true) }
-            status.text = "Visto"
-        })
+        actions.addView(button("Siguiente") { playNext() })
+        actions.addView(button("Visto") { markWatched() })
+        actions.addView(button("YouTube") { openUrl(this, url, OpenMode.EXTERNAL) })
         actions.addView(button("Compartir") { shareText(this, title, url) })
-        column.addView(actions)
+        column.addView(HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(actions)
+        })
         column.addView(text(14f, Color.WHITE).apply {
             text = description
             setPadding(0, dp(8), 0, 0)
         })
         details.removeAllViews()
         details.addView(column)
+        details.scrollTo(0, 0)
     }
 
     private fun text(sizeSp: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
@@ -189,7 +355,7 @@ class YouTubePlayerActivity : ComponentActivity() {
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
         setTextColor(Color.WHITE)
         gravity = Gravity.CENTER
-        setPadding(dp(12), dp(8), dp(12), dp(8))
+        setPadding(dp(14), dp(8), dp(14), dp(8))
         background = android.graphics.drawable.GradientDrawable().apply {
             cornerRadius = dp(18).toFloat()
             setColor(Color.parseColor("#33FFFFFF"))
@@ -205,45 +371,62 @@ class YouTubePlayerActivity : ComponentActivity() {
 
     private fun onTime(time: Double, total: Double, state: Int) {
         if (time > 0) position = time
-        playing = state == 1
+        if (total > 0) duration = total
+        setPlaying(state == 1)
+        // Faltan 30 segundos o menos (y ya has visto al menos la mitad, por los vídeos muy cortos).
+        if (!ended && duration > 0 && duration - position <= WATCHED_REMAINING_SEC && position >= duration / 2) markWatched()
     }
 
     private fun onDuration(total: Double) {
-        if (total > 0) lifecycleScope.launch { container.feeds.setDurationIfUnknown(episodeId, total.toLong()) }
+        if (total > 0) {
+            duration = total
+            val id = episodeId
+            lifecycleScope.launch { container.feeds.setDurationIfUnknown(id, total.toLong()) }
+        }
     }
 
     private fun onState(state: Int) {
-        playing = state == 1
-        // 0 = terminado: solo entonces se marca como visto.
-        if (state == 0 && !ended) {
-            ended = true
-            container.appScope.launch { container.feeds.setWatched(listOf(episodeId), true) }
-            status.text = "Visto"
-        } else if (state == 2) {
-            savePosition()
-        }
+        setPlaying(state == 1)
+        if (state == 0) markWatched() else if (state == 2) savePosition()
+    }
+
+    private fun setPlaying(value: Boolean) {
+        if (playing == value) return
+        playing = value
+        updatePipActions()
+    }
+
+    private fun markWatched() {
+        if (ended) return
+        ended = true
+        val id = episodeId
+        container.appScope.launch { container.feeds.setWatched(listOf(id), true) }
+        status.text = "Visto"
     }
 
     /** El reproductor avisa de que has cambiado la velocidad, la calidad o los subtítulos. */
     private fun onPreference(key: String, value: String) = PlayerPrefs.save(this, key, value)
 
     private fun onError(code: Int) {
-        status.text = if (code == 101 || code == 150) "El autor no permite ver este vídeo fuera de YouTube. Usa «Abrir en YouTube»."
-        else "No se ha podido reproducir el vídeo. Usa «Abrir en YouTube»."
+        status.text = if (code == 101 || code == 150) "El autor no permite ver este vídeo fuera de YouTube. Usa «YouTube»."
+        else "No se ha podido reproducir el vídeo. Usa «YouTube»."
     }
 
     private fun savePosition() {
         val pos = (position * 1000).toLong()
-        if (!ended && pos > 5_000) container.appScope.launch { container.feeds.savePosition(episodeId, pos) }
+        val id = episodeId
+        if (!ended && pos > 5_000 && id.isNotEmpty()) container.appScope.launch { container.feeds.savePosition(id, pos) }
     }
 
     override fun onStop() {
         super.onStop()
-        if (::webView.isInitialized) webView.evaluateJavascript("player && player.pauseVideo && player.pauseVideo()", null)
+        // Pantalla apagada, ventana flotante cerrada…: se pausa y se guarda por dónde ibas.
+        js("player && player.pauseVideo && player.pauseVideo()")
         savePosition()
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(pipReceiver) }
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("FeedVibe")
             webView.destroy()
@@ -268,7 +451,7 @@ class YouTubePlayerActivity : ComponentActivity() {
             fullscreenView = null
             fullscreenCallback?.onCustomViewHidden()
             fullscreenCallback = null
-            applyOrientation(resources.configuration.orientation)
+            applyLayout()
         }
 
         // Sin esto algunos WebView dibujan un cartel gris encima del vídeo.
