@@ -88,6 +88,10 @@ fun PlayerScreen(nav: NavController, episodeId: String) {
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
+                // Si el feed no traía la duración, se guarda para poder mostrar la barra de progreso.
+                if (state == Player.STATE_READY && player.duration > 0) {
+                    container.appScope.launch { container.feeds.setDurationIfUnknown(episodeId, player.duration / 1000) }
+                }
                 if (state == Player.STATE_ENDED) {
                     container.appScope.launch { container.feeds.setWatched(listOf(episodeId), true) }
                 }

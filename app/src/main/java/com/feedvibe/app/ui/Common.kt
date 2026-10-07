@@ -10,6 +10,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import com.feedvibe.app.AppContainer
 import com.feedvibe.app.data.db.EpisodeItem
 import com.feedvibe.app.data.prefs.OpenMode
+import com.feedvibe.app.data.sources.SourceType
+import com.feedvibe.app.data.sources.YouTubeSource
 import kotlinx.coroutines.launch
 
 val LocalContainer = staticCompositionLocalOf<AppContainer> { error("Sin AppContainer") }
@@ -56,18 +58,26 @@ fun shareText(context: Context, title: String, url: String) {
     context.startActivity(Intent.createChooser(intent, "Compartir").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
+/** Vídeo de YouTube que se puede ver en el reproductor integrado (los directos se abren fuera). */
+fun youtubeVideoId(item: EpisodeItem): String? =
+    if (item.sourceType == SourceType.YOUTUBE && !item.episode.isLive) YouTubeSource.videoIdFromUrl(item.episode.url) else null
+
 /**
- * Abre un episodio: los podcasts/archivos multimedia en el reproductor integrado y el
- * resto (YouTube, Twitch...) en su app o en el navegador. Opcionalmente lo marca como visto.
+ * Abre un episodio: los podcasts, archivos multimedia y vídeos de YouTube en el reproductor
+ * integrado (que guarda el progreso y lo marca como visto solo al terminar) y el resto
+ * (Twitch, directos...) en su app o en el navegador.
  */
-fun openEpisode(context: Context, container: AppContainer, item: EpisodeItem, openPlayer: (String) -> Unit) {
+fun openEpisode(context: Context, container: AppContainer, item: EpisodeItem, navigate: (String) -> Unit) {
     if (isPlayableInApp(item)) {
-        openPlayer(item.episode.id)
+        navigate(Routes.player(item.episode.id))
+        return
+    }
+    if (youtubeVideoId(item) != null) {
+        navigate(Routes.youtube(item.episode.id))
         return
     }
     container.appScope.launch {
         val s = container.settings.current()
-        if (s.autoMarkOnOpen && !item.watched && !item.episode.isLive) container.feeds.setWatched(listOf(item.episode.id), true)
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { openUrl(context, item.episode.url, s.openMode) }
     }
 }

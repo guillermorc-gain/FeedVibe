@@ -19,7 +19,7 @@ fun rememberEpisodeCallbacks(nav: NavController, allowOpenChannel: Boolean = tru
         val feeds = container.feeds
         val scope = container.appScope
         EpisodeCallbacks(
-            onOpen = { item -> openEpisode(context, container, item) { id -> nav.navigate(Routes.player(id)) } },
+            onOpen = { item -> openEpisode(context, container, item) { route -> nav.navigate(route) } },
             onToggleWatched = { scope.launch { feeds.toggleWatched(it) } },
             onToggleWatchLater = { scope.launch { feeds.toggleWatchLater(it) } },
             onToggleFavorite = { scope.launch { feeds.toggleFavorite(it) } },

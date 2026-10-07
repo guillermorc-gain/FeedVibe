@@ -121,6 +121,13 @@ interface EpisodeDao {
     @Upsert
     suspend fun upsertAll(episodes: List<EpisodeEntity>)
 
+    /** Duraciones ya conocidas (p. ej. las que averigua el reproductor) para no perderlas al actualizar. */
+    @Query("SELECT id, durationSec FROM episodes WHERE id IN (:ids) AND durationSec > 0")
+    suspend fun knownDurations(ids: List<String>): List<EpisodeDuration>
+
+    @Query("UPDATE episodes SET durationSec = :sec WHERE id = :id AND durationSec <= 0")
+    suspend fun setDurationIfUnknown(id: String, sec: Long)
+
     @Query("DELETE FROM episodes WHERE subscriptionId = :subId")
     suspend fun deleteForSubscription(subId: String)
 }
@@ -155,3 +162,5 @@ abstract class EpisodeStateDao {
         return toApply
     }
 }
+
+data class EpisodeDuration(val id: String, val durationSec: Long)

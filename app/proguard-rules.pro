@@ -16,3 +16,8 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+
+# Puente JavaScript del reproductor de YouTube
+-keepclassmembers class com.feedvibe.app.ui.screens.PlayerBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}

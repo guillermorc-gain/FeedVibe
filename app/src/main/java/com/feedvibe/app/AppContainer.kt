@@ -12,6 +12,9 @@ import com.feedvibe.app.data.sync.CloudSync
 import com.feedvibe.app.notify.Notifier
 import com.feedvibe.app.update.AppUpdater
 import android.util.Log
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +54,11 @@ class AppContainer(val context: Context) {
         cloud.onRemoteProfile = { nick, photo, stamp ->
             appScope.launch { profile.applyRemote(nick, photo, stamp) }
         }
+        // La sincronización en tiempo real solo funciona con la app a la vista (ahorra batería).
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) = cloud.setForeground(true)
+            override fun onStop(owner: LifecycleOwner) = cloud.setForeground(false)
+        })
         // Arranca/para la sincronización según haya sesión iniciada.
         appScope.launch {
             auth.user.collect { u ->

@@ -367,15 +367,12 @@ fun PlaybackScreen(nav: NavController, settings: AppSettings) {
             }
         }
         Text(
-            "Los podcasts y archivos de audio/vídeo se reproducen siempre en el reproductor integrado, recordando por dónde ibas en todos tus dispositivos.",
+            "Los vídeos de YouTube, los podcasts y los archivos de audio/vídeo se reproducen en el reproductor integrado, recordando por dónde ibas en todos tus dispositivos. Solo se marcan como vistos cuando llegas al final.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
         )
         SettingsGroup {
-            SwitchRow("Marcar como visto al abrir", "Si no, márcalo tú deslizando o desde el menú", settings.autoMarkOnOpen) {
-                update { s -> s.copy(autoMarkOnOpen = it) }
-            }
             SwitchRow("Ocultar los Shorts de YouTube", "Se ocultan al momento en todas las listas", settings.hideShorts) {
                 update { s -> s.copy(hideShorts = it) }
             }
