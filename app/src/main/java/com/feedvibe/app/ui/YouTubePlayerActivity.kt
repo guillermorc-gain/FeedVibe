@@ -73,7 +73,7 @@ class YouTubePlayerActivity : ComponentActivity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
-            addJavascriptInterface(PlayerBridge(::onTime, ::onDuration, ::onState, ::onError), "FeedVibe")
+            addJavascriptInterface(PlayerBridge(::onTime, ::onDuration, ::onState, ::onError, ::onPreference), "FeedVibe")
             webChromeClient = chrome
         }
         status = text(13f, Color.LTGRAY)
@@ -112,7 +112,7 @@ class YouTubePlayerActivity : ComponentActivity() {
             position = start.toDouble()
             // YouTube exige un origen/referente identificable para los reproductores incrustados.
             val origin = "https://$packageName"
-            webView.loadDataWithBaseURL(origin, playerHtml(videoId, start, origin), "text/html", "utf-8", null)
+            webView.loadDataWithBaseURL(origin, playerHtml(videoId, start, origin, PlayerPrefs.load(this@YouTubePlayerActivity)), "text/html", "utf-8", null)
         }
 
         // Guarda la posición cada cierto tiempo (se sincroniza entre dispositivos).
@@ -224,6 +224,9 @@ class YouTubePlayerActivity : ComponentActivity() {
         }
     }
 
+    /** El reproductor avisa de que has cambiado la velocidad, la calidad o los subtítulos. */
+    private fun onPreference(key: String, value: String) = PlayerPrefs.save(this, key, value)
+
     private fun onError(code: Int) {
         status.text = if (code == 101 || code == 150) "El autor no permite ver este vídeo fuera de YouTube. Usa «Abrir en YouTube»."
         else "No se ha podido reproducir el vídeo. Usa «Abrir en YouTube»."
@@ -279,6 +282,7 @@ class PlayerBridge(
     private val duration: (Double) -> Unit,
     private val state: (Int) -> Unit,
     private val error: (Int) -> Unit,
+    private val preference: (String, String) -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
 
@@ -293,9 +297,53 @@ class PlayerBridge(
 
     @JavascriptInterface
     fun onError(code: Int) { main.post { this.error(code) } }
+
+    @JavascriptInterface
+    fun onPreference(key: String, value: String) { main.post { this.preference(key, value) } }
 }
 
-private fun playerHtml(videoId: String, start: Long, origin: String) = """
+/**
+ * Velocidad, calidad y subtítulos del último vídeo, para usarlos en el siguiente
+ * (se guardan en este dispositivo).
+ */
+data class PlayerPrefs(val rate: Double, val quality: String, val captions: String) {
+    companion object {
+        const val RATE = "rate"
+        const val QUALITY = "quality"
+        const val CAPTIONS = "captions"
+        private val SAFE = Regex("[A-Za-z0-9_-]{0,20}")
+
+        private fun prefs(context: Context) = context.getSharedPreferences("youtube_player", Context.MODE_PRIVATE)
+
+        fun load(context: Context): PlayerPrefs {
+            val p = prefs(context)
+            return PlayerPrefs(
+                rate = p.getFloat(RATE, 1f).toDouble().takeIf { it in 0.25..2.0 } ?: 1.0,
+                // Solo valores seguros: se insertan en la página del reproductor.
+                quality = p.getString(QUALITY, "").orEmpty().takeIf { SAFE.matches(it) }.orEmpty(),
+                captions = p.getString(CAPTIONS, "").orEmpty().takeIf { SAFE.matches(it) }.orEmpty(),
+            )
+        }
+
+        fun save(context: Context, key: String, value: String) {
+            val p = prefs(context).edit()
+            when (key) {
+                RATE -> value.toFloatOrNull()?.takeIf { it in 0.25f..2f }?.let { p.putFloat(RATE, it) }
+                QUALITY -> if (SAFE.matches(value) && value != "unknown") p.putString(QUALITY, value)
+                CAPTIONS -> if (SAFE.matches(value)) p.putString(CAPTIONS, value)
+            }
+            p.apply()
+        }
+    }
+}
+
+private fun playerHtml(videoId: String, start: Long, origin: String, prefs: PlayerPrefs): String {
+    val cc = prefs.captions
+    // Subtítulos: si en el vídeo anterior estaban puestos, se cargan en el mismo idioma.
+    val ccVars = if (cc.isNotEmpty()) ", cc_load_policy: 1, cc_lang_pref: '$cc'" else ""
+    // La calidad no se puede imponer con la API oficial; «vq» es una pista que YouTube puede ignorar.
+    val qVars = if (prefs.quality.isNotEmpty() && prefs.quality != "auto") ", vq: '${prefs.quality}'" else ""
+    return """
 <!doctype html>
 <html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -304,23 +352,65 @@ private fun playerHtml(videoId: String, start: Long, origin: String) = """
 <div id="p"></div>
 <script>
 var player;
+var RATE = ${prefs.rate}, QUALITY = '${prefs.quality}', CC = '$cc';
+var readyAt = 0, lastCc = null, pendingCc = null;
 var tag = document.createElement('script');
 tag.src = 'https://www.youtube.com/iframe_api';
 document.head.appendChild(tag);
+function applyPrefs(p) {
+  if (RATE !== 1 && p.getPlaybackRate() !== RATE) p.setPlaybackRate(RATE);
+  if (QUALITY && QUALITY !== 'auto' && p.setPlaybackQuality) p.setPlaybackQuality(QUALITY);
+  if (CC) {
+    try { p.loadModule('captions'); p.setOption('captions', 'track', { languageCode: CC }); } catch (err) {}
+  }
+}
+function currentCc() {
+  try {
+    var t = player.getOption('captions', 'track');
+    return (t && t.languageCode) ? t.languageCode : '';
+  } catch (err) { return ''; }
+}
 function onYouTubeIframeAPIReady() {
   player = new YT.Player('p', {
     width: '100%', height: '100%', videoId: '$videoId',
-    playerVars: { autoplay: 1, playsinline: 1, rel: 0, start: $start, origin: '$origin', widget_referrer: '$origin' },
+    playerVars: { autoplay: 1, playsinline: 1, rel: 0, start: $start, origin: '$origin', widget_referrer: '$origin'$ccVars$qVars },
     events: {
-      onReady: function(e) { FeedVibe.onDuration(e.target.getDuration()); e.target.playVideo(); },
-      onStateChange: function(e) { FeedVibe.onState(e.data); },
+      onReady: function(e) {
+        readyAt = Date.now();
+        FeedVibe.onDuration(e.target.getDuration());
+        applyPrefs(e.target);
+        e.target.playVideo();
+      },
+      onStateChange: function(e) {
+        // Al empezar a reproducirse se vuelve a aplicar (algunos ajustes no se aceptan antes).
+        if (e.data === 1 && Date.now() - readyAt < 10000) applyPrefs(e.target);
+        FeedVibe.onState(e.data);
+      },
+      onPlaybackRateChange: function(e) {
+        if (Date.now() - readyAt > 3000) { RATE = e.data; FeedVibe.onPreference('rate', String(e.data)); }
+      },
+      onPlaybackQualityChange: function(e) {
+        if (Date.now() - readyAt > 3000) FeedVibe.onPreference('quality', String(e.data));
+      },
       onError: function(e) { FeedVibe.onError(e.data); }
     }
   });
   setInterval(function() {
-    if (player && player.getCurrentTime) FeedVibe.onTime(player.getCurrentTime(), player.getDuration(), player.getPlayerState());
+    if (!player || !player.getCurrentTime) return;
+    FeedVibe.onTime(player.getCurrentTime(), player.getDuration(), player.getPlayerState());
+    // Subtítulos: no hay evento, se comprueba cada segundo. Pasados unos segundos desde el
+    // arranque (para no confundir la carga inicial) y solo si el cambio se mantiene.
+    if (Date.now() - readyAt < 8000 || player.getPlayerState() !== 1) return;
+    var c = currentCc();
+    // Lo primero que se ve es lo que aplicó el reproductor (puede que el vídeo no tenga ese idioma):
+    // no se guarda; solo se guardan los cambios que hagas después.
+    if (lastCc === null) { lastCc = c; return; }
+    if (c === lastCc) { pendingCc = null; return; }
+    if (pendingCc === c) { lastCc = c; CC = c; pendingCc = null; FeedVibe.onPreference('captions', c); }
+    else pendingCc = c;
   }, 1000);
 }
 </script>
 </body></html>
 """.trimIndent()
+}
