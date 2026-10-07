@@ -18,6 +18,6 @@
 -dontwarn org.openjsse.**
 
 # Puente JavaScript del reproductor de YouTube
--keepclassmembers class com.feedvibe.app.ui.screens.PlayerBridge {
+-keepclassmembers class com.feedvibe.app.ui.PlayerBridge {
     @android.webkit.JavascriptInterface <methods>;
 }

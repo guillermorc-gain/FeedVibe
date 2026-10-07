@@ -73,7 +73,7 @@ fun openEpisode(context: Context, container: AppContainer, item: EpisodeItem, na
         return
     }
     if (youtubeVideoId(item) != null) {
-        navigate(Routes.youtube(item.episode.id))
+        context.startActivity(YouTubePlayerActivity.intent(context, item.episode.id))
         return
     }
     container.appScope.launch {

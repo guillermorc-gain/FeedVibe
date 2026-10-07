@@ -49,6 +49,12 @@
             </intent-filter>
         </activity>
 
+        <!-- Reproductor de YouTube (pantalla clásica: en Compose el vídeo se veía negro). -->
+        <activity
+            android:name=".ui.YouTubePlayerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation" />
+
         <receiver
             android:name=".notify.NotificationActionReceiver"
             android:exported="false" />
