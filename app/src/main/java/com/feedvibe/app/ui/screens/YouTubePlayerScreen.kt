@@ -3,6 +3,7 @@ package com.feedvibe.app.ui.screens
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -129,16 +130,6 @@ fun YouTubePlayerScreen(nav: NavController, episodeId: String) {
         )
     }
 
-    val webView = remember {
-        WebView(context).apply {
-            setBackgroundColor(android.graphics.Color.BLACK)
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            addJavascriptInterface(bridge, "FeedVibe")
-        }
-    }
-
     // Pantalla completa del reproductor: se muestra encima de todo y en horizontal.
     val activity = context as? Activity
     val chrome = remember {
@@ -162,6 +153,10 @@ fun YouTubePlayerScreen(nav: NavController, episodeId: String) {
                 fullscreen = v
             }
 
+            // Sin esto algunos WebView dibujan un cartel gris/negro encima del vídeo.
+            override fun getDefaultVideoPoster(): Bitmap =
+                Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+
             override fun onHideCustomView() {
                 val act = activity ?: return
                 fullscreen?.let { (act.window.decorView as FrameLayout).removeView(it) }
@@ -173,7 +168,17 @@ fun YouTubePlayerScreen(nav: NavController, episodeId: String) {
             }
         }
     }
-    LaunchedEffect(Unit) { webView.webChromeClient = chrome }
+    val webView = remember {
+        WebView(context).apply {
+            setBackgroundColor(android.graphics.Color.BLACK)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            addJavascriptInterface(bridge, "FeedVibe")
+            webChromeClient = chrome
+        }
+    }
+
     BackHandler(enabled = fullscreen != null) { chrome.onHideCustomView() }
 
     // Carga el vídeo una sola vez, continuando por donde lo dejaste.
@@ -181,6 +186,9 @@ fun YouTubePlayerScreen(nav: NavController, episodeId: String) {
     LaunchedEffect(videoId) {
         val it = current ?: return@LaunchedEffect
         if (loaded || videoId == null) return@LaunchedEffect
+        // El vídeo debe empezar con el reproductor ya colocado en pantalla; si arranca antes
+        // (tamaño 0) algunos móviles reproducen el sonido pero dejan la imagen en negro.
+        while (!webView.isAttachedToWindow || webView.width == 0 || webView.height == 0) delay(16)
         val start = if (it.positionMs > 0 && !it.watched) it.positionMs / 1000 else 0L
         position = start.toFloat()
         if (it.episode.durationSec > 0) duration = it.episode.durationSec.toFloat()
@@ -232,7 +240,8 @@ fun YouTubePlayerScreen(nav: NavController, episodeId: String) {
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
+        // El reproductor queda fijo arriba (fuera de la zona que se desplaza) y solo se desplaza el texto.
+        Column(Modifier.fillMaxSize().padding(padding)) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
                 AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
                 if (current != null && (error != null || videoId == null)) {
@@ -258,7 +267,7 @@ fun YouTubePlayerScreen(nav: NavController, episodeId: String) {
                 )
             }
             if (current != null) {
-                Column(Modifier.padding(16.dp)) {
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
                     Text(current.episode.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
                         "${current.channelTitle} · ${relativeTime(current.episode.publishedAt)}",
