@@ -14,6 +14,8 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.net.wifi.WifiManager
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.feedvibe.app.R
@@ -52,6 +54,9 @@ class PlaybackService : Service() {
     }
 
     private lateinit var session: MediaSession
+    // Mientras suena: CPU y Wi‑Fi despiertas (con la pantalla apagada se dormirían y el vídeo se cortaría).
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -87,13 +92,37 @@ class PlaybackService : Service() {
 
     override fun onDestroy() {
         instance = null
+        setAwake(false)
         session.release()
         super.onDestroy()
     }
 
     private fun control(control: Int) = sendBroadcast(YouTubePlayerActivity.controlIntent(this, control))
 
+    @Suppress("DEPRECATION")
+    private fun setAwake(awake: Boolean) {
+        if (awake) {
+            if (wakeLock == null) {
+                wakeLock = getSystemService(PowerManager::class.java)
+                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FeedVibe:playback")
+                    .apply { setReferenceCounted(false) }
+            }
+            if (wifiLock == null) {
+                wifiLock = (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
+                    .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "FeedVibe:playback")
+                    .apply { setReferenceCounted(false) }
+            }
+            // Con límite por si algo falla; se renueva en cada cambio de estado.
+            wakeLock?.acquire(6 * 60 * 60 * 1000L)
+            wifiLock?.acquire()
+        } else {
+            wakeLock?.takeIf { it.isHeld }?.release()
+            wifiLock?.takeIf { it.isHeld }?.release()
+        }
+    }
+
     private fun refresh() {
+        setAwake(playing)
         session.setMetadata(
             MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, title)
