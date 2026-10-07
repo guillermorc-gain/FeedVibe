@@ -63,21 +63,23 @@ fun youtubeVideoId(item: EpisodeItem): String? =
     if (item.sourceType == SourceType.YOUTUBE && !item.episode.isLive) YouTubeSource.videoIdFromUrl(item.episode.url) else null
 
 /**
- * Abre un episodio: los podcasts, archivos multimedia y vídeos de YouTube en el reproductor
- * integrado (que guarda el progreso y lo marca como visto solo al terminar) y el resto
- * (Twitch, directos...) en su app o en el navegador.
+ * Abre un episodio: los podcasts y archivos multimedia en el reproductor integrado. Los vídeos
+ * de YouTube según el ajuste: en FeedVibe (guarda el progreso y los marca como vistos solo al
+ * terminar) o en la app de YouTube. El resto (Twitch, directos...) en su app o en el navegador.
  */
 fun openEpisode(context: Context, container: AppContainer, item: EpisodeItem, navigate: (String) -> Unit) {
     if (isPlayableInApp(item)) {
         navigate(Routes.player(item.episode.id))
         return
     }
-    if (youtubeVideoId(item) != null) {
-        context.startActivity(YouTubePlayerActivity.intent(context, item.episode.id))
-        return
-    }
     container.appScope.launch {
         val s = container.settings.current()
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { openUrl(context, item.episode.url, s.openMode) }
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            if (s.openMode == OpenMode.INTERNAL && youtubeVideoId(item) != null) {
+                context.startActivity(YouTubePlayerActivity.intent(context, item.episode.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } else {
+                openUrl(context, item.episode.url, s.openMode)
+            }
+        }
     }
 }
