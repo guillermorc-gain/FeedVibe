@@ -136,7 +136,8 @@ class SettingsRepository(private val context: Context) {
         val lastBackup = longPreferencesKey("last_backup")
         val lastUpdateCheck = longPreferencesKey("last_update_check")
         val stateCursor = longPreferencesKey("state_cursor")
-        val syncedUid = stringPreferencesKey("synced_uid")
+        // v2: la v1 se marcaba aunque la subida inicial hubiera fallado; así se repite una vez.
+        val syncedUid = stringPreferencesKey("synced_uid_v2")
         val profilePhotoVersion = longPreferencesKey("profile_photo_version")
         val onboardingDone = booleanPreferencesKey("onboarding_done")
     }
