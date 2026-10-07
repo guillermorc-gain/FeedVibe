@@ -1,5 +1,7 @@
 package com.feedvibe.app.ui
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -165,7 +167,15 @@ fun AppRoot(settings: AppSettings, external: ExternalRequest?, onExternalHandled
         composable(Routes.PLAYER, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
             Detail { PlayerScreen(nav, it.arguments?.getString("id").orEmpty()) }
         }
-        composable(Routes.YOUTUBE, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
+        // Sin animación de fundido: la capa que la anima puede dejar el vídeo del WebView en negro.
+        composable(
+            Routes.YOUTUBE,
+            arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            enterTransition = { EnterTransition.None },
+            exitTransition = { ExitTransition.None },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { ExitTransition.None },
+        ) {
             Detail { YouTubePlayerScreen(nav, it.arguments?.getString("id").orEmpty()) }
         }
         composable(Routes.APPEARANCE) { Detail { AppearanceScreen(nav, settings) } }
