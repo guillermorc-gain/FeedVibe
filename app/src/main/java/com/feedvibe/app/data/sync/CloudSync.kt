@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.Date
@@ -74,7 +75,18 @@ class CloudSync(
             // Primer inicio de sesión de este usuario en este dispositivo: subir lo local.
             if (settings.syncedUid() != newUid) {
                 settings.setStateCursor(0)
-                runCatching { uploadAll(newUid) }.onFailure { Log.w(TAG, "uploadAll", it) }
+                // Solo se da por sincronizado cuando la subida inicial termina bien. Si falla
+                // (sin conexión, base de datos aún no creada…) se reintenta cada vez más espaciado.
+                var waitMs = 15_000L
+                while (true) {
+                    if (synchronized(this@CloudSync) { uid != newUid }) return@launch
+                    val ok = runCatching { uploadAll(newUid) }
+                        .onFailure { Log.w(TAG, "uploadAll", it); _status.value = SyncStatus.ERROR }
+                        .isSuccess
+                    if (ok) break
+                    delay(waitMs)
+                    waitMs = (waitMs * 2).coerceAtMost(5 * 60_000L)
+                }
                 settings.setSyncedUid(newUid)
             }
             synchronized(this@CloudSync) { if (uid == newUid) ready = true }
