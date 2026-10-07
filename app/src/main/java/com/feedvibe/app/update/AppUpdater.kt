@@ -47,28 +47,49 @@ class AppUpdater(private val context: Context) {
     suspend fun check(): UpdateState {
         _state.value = UpdateState.Checking
         val result = try {
-            val json = AppJson.parseToJsonElement(
-                Http.get(
-                    "https://api.github.com/repos/${BuildConfig.UPDATE_REPO}/releases/latest",
-                    mapOf("Accept" to "application/vnd.github+json"),
-                ).body
-            )
-            val tag = json.str("tag_name") ?: error("Sin versiones publicadas")
-            val apk = json.arr("assets").orEmpty().firstOrNull { it.str("name")?.endsWith(".apk") == true }
-                ?: error("La versión $tag no tiene APK")
-            val info = ReleaseInfo(
-                version = tag.removePrefix("v"),
-                notes = json.str("body").orEmpty(),
-                apkUrl = apk.str("browser_download_url") ?: error("APK sin URL"),
-                size = apk.long("size") ?: 0,
-                pageUrl = json.str("html_url").orEmpty(),
-            )
+            // La API de GitHub solo permite 60 consultas por hora sin cuenta (error 403):
+            // si falla se usa la página web de la última versión, que no tiene ese límite.
+            val info = runCatching { latestFromApi() }.getOrElse { latestFromWeb() }
             if (isNewer(info.version, currentVersion)) UpdateState.Available(info) else UpdateState.UpToDate
         } catch (e: Exception) {
             UpdateState.Error(e.message ?: "No se pudo comprobar")
         }
         _state.value = result
         return result
+    }
+
+    private suspend fun latestFromApi(): ReleaseInfo {
+        val json = AppJson.parseToJsonElement(
+            Http.get(
+                "https://api.github.com/repos/${BuildConfig.UPDATE_REPO}/releases/latest",
+                mapOf("Accept" to "application/vnd.github+json"),
+            ).body
+        )
+        val tag = json.str("tag_name") ?: error("Sin versiones publicadas")
+        val apk = json.arr("assets").orEmpty().firstOrNull { it.str("name")?.endsWith(".apk") == true }
+            ?: error("La versión $tag no tiene APK")
+        return ReleaseInfo(
+            version = tag.removePrefix("v"),
+            notes = json.str("body").orEmpty(),
+            apkUrl = apk.str("browser_download_url") ?: error("APK sin URL"),
+            size = apk.long("size") ?: 0,
+            pageUrl = json.str("html_url").orEmpty(),
+        )
+    }
+
+    /** github.com/…/releases/latest redirige a …/releases/tag/vX.Y.Z; el APK se llama FeedVibe-X.Y.Z.apk. */
+    private suspend fun latestFromWeb(): ReleaseInfo {
+        val repo = BuildConfig.UPDATE_REPO
+        val page = Http.get("https://github.com/$repo/releases/latest").finalUrl
+        val tag = page.substringAfter("/releases/tag/", "").substringBefore('?').ifBlank { error("Sin versiones publicadas") }
+        val version = tag.removePrefix("v")
+        return ReleaseInfo(
+            version = version,
+            notes = "",
+            apkUrl = "https://github.com/$repo/releases/download/$tag/FeedVibe-$version.apk",
+            size = 0,
+            pageUrl = page,
+        )
     }
 
     fun dismiss() {

@@ -48,6 +48,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -124,6 +125,13 @@ object HomeTabs {
 fun AppRoot(settings: AppSettings, external: ExternalRequest?, onExternalHandled: () -> Unit) {
     val container = LocalContainer.current
     val nav = rememberNavController()
+    androidx.compose.runtime.DisposableEffect(nav) {
+        val l = androidx.navigation.NavController.OnDestinationChangedListener { _, d, _ ->
+            com.feedvibe.app.CrashReport.note("Pantalla ${d.route}")
+        }
+        nav.addOnDestinationChangedListener(l)
+        onDispose { nav.removeOnDestinationChangedListener(l) }
+    }
     val context = LocalContext.current
 
     // Permiso de notificaciones (Android 13+): avisos de episodios nuevos y número en el icono.
@@ -170,6 +178,7 @@ fun AppRoot(settings: AppSettings, external: ExternalRequest?, onExternalHandled
     }
 
     UpdateDialog()
+    CrashDialog()
 }
 
 /** Pantallas secundarias: dejan sitio a la barra de navegación del sistema. */
@@ -190,6 +199,7 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
     val start = remember { val half = Int.MAX_VALUE / 2; half - half % tabs.size }
     val pager = rememberPagerState(initialPage = start) { Int.MAX_VALUE }
     val current = Math.floorMod(pager.currentPage, tabs.size)
+    LaunchedEffect(current) { com.feedvibe.app.CrashReport.note("Pestaña $current") }
 
     fun goTo(index: Int) {
         var diff = index - current
@@ -246,6 +256,41 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
 fun NavController.navigateTab(route: String) {
     HomeTabs.requested.value = HomeTabs.indexOf(route)
     if (!popBackStack(Routes.HOME, inclusive = false)) navigate(Routes.HOME)
+}
+
+/** Si la app se cerró sola la última vez, ofrece compartir el informe. */
+@Composable
+fun CrashDialog() {
+    val context = LocalContext.current
+    var report by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        report = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { com.feedvibe.app.CrashReport.pending(context) }.getOrNull()
+        }
+    }
+    val text = report ?: return
+    fun close() { com.feedvibe.app.CrashReport.clear(context); report = null }
+    AlertDialog(
+        onDismissRequest = { close() },
+        title = { Text("La app se cerró inesperadamente") },
+        text = {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                Text("Comparte este informe para poder arreglarlo.")
+                Spacer(Modifier.height(8.dp))
+                Text(text, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_TEXT, text)
+                context.startActivity(android.content.Intent.createChooser(send, "Compartir informe"))
+                close()
+            }) { Text("Compartir") }
+        },
+        dismissButton = { TextButton(onClick = { close() }) { Text("Cerrar") } },
+    )
 }
 
 /** Diálogo de actualización disponible / descargando (sin salir de la app). */

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,6 +31,8 @@ fun ScreenScaffold(
     actions: @Composable RowScope.() -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
     titleContent: (@Composable () -> Unit)? = null,
+    /** Pantallas principales: logotipo «FeedVibe» centrado en lugar del título. */
+    brand: Boolean = false,
     /** Si no es null sustituye a la barra superior (p. ej. la barra de selección múltiple). */
     topBarOverride: (@Composable () -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
@@ -43,6 +46,17 @@ fun ScreenScaffold(
         topBar = {
             if (topBarOverride != null) {
                 topBarOverride()
+            } else if (brand && titleContent == null) {
+                CenterAlignedTopAppBar(
+                    title = { BrandTitle() },
+                    navigationIcon = {
+                        if (onBack != null) {
+                            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás") }
+                        }
+                    },
+                    actions = actions,
+                    scrollBehavior = scrollBehavior,
+                )
             } else {
                 TopAppBar(
                     title = { if (titleContent != null) titleContent() else Text(title, fontWeight = FontWeight.Bold) },

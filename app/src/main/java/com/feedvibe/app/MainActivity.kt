@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val container = (application as FeedVibeApp).container
         handleIntent(intent)
+        com.feedvibe.app.update.UpdatedReceiver.clear(this)
 
         // Solo al abrir la app de verdad, no cuando Android vuelve a crear la pantalla.
         if (savedInstanceState == null) {

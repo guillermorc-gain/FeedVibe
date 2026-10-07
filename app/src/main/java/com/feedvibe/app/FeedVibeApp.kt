@@ -10,8 +10,15 @@ class FeedVibeApp : Application() {
     lateinit var container: AppContainer
         private set
 
+    // Lo antes posible: también se registran los fallos al iniciar componentes previos a onCreate.
+    override fun attachBaseContext(base: android.content.Context) {
+        super.attachBaseContext(base)
+        CrashReport.install(this)
+    }
+
     override fun onCreate() {
         super.onCreate()
+        CrashReport.note("Inicio de la app ${BuildConfig.VERSION_NAME}")
         container = AppContainer(this)
         container.notifier.createChannels()
         // Reprograma los trabajos periódicos cuando cambian los ajustes.

@@ -130,8 +130,11 @@ class CloudSync(
             .whereGreaterThan("serverUpdatedAt", since)
             .addSnapshotListener { snap, err ->
                 if (err != null) { _status.value = SyncStatus.ERROR; Log.w(TAG, "states", err); return@addSnapshotListener }
-                val docs = snap?.documentChanges?.filter { it.type != DocumentChange.Type.REMOVED }?.map { it.document } ?: return@addSnapshotListener
-                scope.launch { applyRemoteStates(docs) }
+                // Los cambios propios aún sin confirmar (hasPendingWrites) ya están aplicados aquí.
+                val docs = snap?.documentChanges
+                    ?.filter { it.type != DocumentChange.Type.REMOVED && !it.document.metadata.hasPendingWrites() }
+                    ?.map { it.document } ?: return@addSnapshotListener
+                if (docs.isNotEmpty()) scope.launch { applyRemoteStates(docs) }
                 _status.value = SyncStatus.SYNCED
             }
         listeners += userDoc(u).addSnapshotListener { snap, _ ->
@@ -295,7 +298,8 @@ class CloudSync(
 
         val remoteStates = userDoc(u).collection("states").get().await().documents
         val remoteStateTimes = remoteStates.associate { it.id to (it.getLong("updatedAt") ?: -1) }
-        val localStates = db.states().getAll().filter { s -> (remoteStateTimes[s.episodeId] ?: -1) < s.updatedAt }
+        // Los vistos automáticos del historial (updatedAt <= 1) no se suben.
+        val localStates = db.states().getAll().filter { s -> s.updatedAt > 1 && (remoteStateTimes[s.episodeId] ?: -1) < s.updatedAt }
         applyRemoteStates(remoteStates)
         localStates.chunked(400).forEach { chunk ->
             val batch = fs.batch()

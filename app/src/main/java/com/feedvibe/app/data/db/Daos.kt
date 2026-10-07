@@ -63,6 +63,8 @@ interface SubscriptionDao {
     suspend fun setRefreshResult(id: String, time: Long, error: String?)
 }
 
+data class EpisodeSubId(val id: String, val subscriptionId: String)
+
 private const val SHORTS = "(:hideShorts = 0 OR e.isShort = 0)"
 
 @Dao
@@ -103,6 +105,9 @@ interface EpisodeDao {
 
     @Query("SELECT id FROM episodes WHERE subscriptionId = :subId")
     suspend fun idsForSubscription(subId: String): List<String>
+
+    @Query("SELECT id, subscriptionId FROM episodes WHERE id IN (:ids)")
+    suspend fun subscriptionIds(ids: List<String>): List<EpisodeSubId>
 
     @Query("SELECT * FROM episodes WHERE subscriptionId = :subId")
     suspend fun forSubscription(subId: String): List<EpisodeEntity>
