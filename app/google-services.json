@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "925338777866",
+    "project_id": "feedvibe-5f595",
+    "storage_bucket": "feedvibe-5f595.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:925338777866:android:cb302b507e6c015ca5e2f3",
+        "android_client_info": {
+          "package_name": "com.feedvibe.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "925338777866-11h73gvcdsq76f0o1hndhem45bq9l8t6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.feedvibe.app",
+            "certificate_hash": "a77b6dc96805987c8a6226c288cb35f84e14697d"
+          }
+        },
+        {
+          "client_id": "925338777866-poa4qbqhc85739t7t4io79ilm1cbp85n.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4GYLhlqAhHEg62AErN4t0e3mYfS5q1eY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "925338777866-poa4qbqhc85739t7t4io79ilm1cbp85n.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
