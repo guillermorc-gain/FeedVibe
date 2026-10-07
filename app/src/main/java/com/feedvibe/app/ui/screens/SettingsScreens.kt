@@ -361,21 +361,21 @@ fun PlaybackScreen(nav: NavController, settings: AppSettings) {
         SettingsGroup {
             OpenMode.entries.forEach { m ->
                 RadioRow(
-                    m.label + if (m == OpenMode.EXTERNAL) " (YouTube, Twitch…)" else " (sin salir de FeedVibe)",
+                    if (m == OpenMode.EXTERNAL) "App externa (YouTube, Twitch…)" else "Dentro de FeedVibe",
                     m, settings.openMode,
                 ) { update { s -> s.copy(openMode = it) } }
             }
         }
         Text(
-            "Los podcasts y archivos de audio/vídeo se reproducen siempre en el reproductor integrado, recordando por dónde ibas en todos tus dispositivos.",
+            if (settings.openMode == OpenMode.INTERNAL)
+                "Los vídeos de YouTube se ven en el reproductor de FeedVibe: recuerda por dónde ibas (en todos tus dispositivos), la velocidad y los subtítulos, y solo los marca como vistos cuando llegas al final. Twitch y el resto se abren en el navegador integrado."
+            else
+                "Los vídeos se abren en su app (YouTube, Twitch…): FeedVibe no sabe cuánto has visto, así que márcalos tú como vistos deslizando o desde el menú. Elige «Dentro de FeedVibe» para que se guarde el progreso y se marquen solos al terminar.\n\nLos podcasts y archivos de audio/vídeo se reproducen siempre en el reproductor integrado.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
         )
         SettingsGroup {
-            SwitchRow("Marcar como visto al abrir", "Si no, márcalo tú deslizando o desde el menú", settings.autoMarkOnOpen) {
-                update { s -> s.copy(autoMarkOnOpen = it) }
-            }
             SwitchRow("Ocultar los Shorts de YouTube", "Se ocultan al momento en todas las listas", settings.hideShorts) {
                 update { s -> s.copy(hideShorts = it) }
             }

@@ -28,16 +28,20 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val container = (application as FeedVibeApp).container
         handleIntent(intent)
+        com.feedvibe.app.update.UpdatedReceiver.clear(this)
 
-        lifecycleScope.launch {
-            val s = container.settings.current()
-            if (s.refreshOnOpen) runCatching { container.feeds.refreshAll() }
-        }
-        lifecycleScope.launch {
-            // Buscar actualizaciones cada vez que se abre la app.
-            if (container.settings.current().autoUpdateCheck) {
-                container.settings.setLastUpdateCheck(System.currentTimeMillis())
-                container.updater.check()
+        // Solo al abrir la app de verdad, no cuando Android vuelve a crear la pantalla.
+        if (savedInstanceState == null) {
+            lifecycleScope.launch {
+                val s = container.settings.current()
+                if (s.refreshOnOpen) runCatching { container.feeds.refreshAll() }
+            }
+            lifecycleScope.launch {
+                // Buscar actualizaciones cada vez que se abre la app.
+                if (container.settings.current().autoUpdateCheck) {
+                    container.settings.setLastUpdateCheck(System.currentTimeMillis())
+                    container.updater.check()
+                }
             }
         }
         container.startBackgroundJobs()

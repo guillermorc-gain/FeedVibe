@@ -122,6 +122,7 @@ dependencies {
     implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.browser)
+    implementation(libs.androidx.webkit)
 
     implementation(libs.coil.compose)
     implementation(libs.okhttp)

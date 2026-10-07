@@ -20,10 +20,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -35,6 +35,9 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay as PlaylistPlayOutlined
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,6 +64,9 @@ import androidx.navigation.NavController
 import com.feedvibe.app.data.prefs.AppSettings
 import com.feedvibe.app.ui.LocalContainer
 import com.feedvibe.app.ui.Routes
+import com.feedvibe.app.ui.YouTubePlayerActivity
+import com.feedvibe.app.ui.youtubeVideoId
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.text.KeyboardActions
 import com.feedvibe.app.ui.components.AddFromSearchCard
 import com.feedvibe.app.ui.components.EmptyState
@@ -119,8 +125,20 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
         snackbar.showSnackbar(msg)
     }
 
+    val context = LocalContext.current
+    /** Reproduce el primer vídeo de YouTube sin ver de la lista; «Siguiente» sigue por ella. */
+    fun playNext() {
+        val ids = visible.filter { !it.watched && youtubeVideoId(it) != null }.map { it.episode.id }
+        if (ids.isEmpty()) {
+            scope.launch { snackbar.showSnackbar("No hay vídeos de YouTube sin ver en la lista") }
+        } else {
+            context.startActivity(YouTubePlayerActivity.intent(context, ids.first(), ids))
+        }
+    }
+
     ScreenScaffold(
         title = "FeedVibe",
+        brand = true,
         snackbar = snackbar,
         topBarOverride = if (selection.active) {
             { EpisodeSelectionBar(selection, visible) }
@@ -147,6 +165,21 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
         actions = {
             IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
                 Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, "Buscar")
+            }
+            // Reproducción automática: al terminar un vídeo pasa solo al siguiente sin ver.
+            IconButton(onClick = {
+                val on = !settings.autoplayNext
+                scope.launch {
+                    container.settings.update { it.copy(autoplayNext = on) }
+                    snackbar.currentSnackbarData?.dismiss()
+                    snackbar.showSnackbar(if (on) "Reproducción automática activada: al terminar un vídeo empieza el siguiente" else "Reproducción automática desactivada")
+                }
+            }) {
+                Icon(
+                    if (settings.autoplayNext) Icons.AutoMirrored.Filled.PlaylistPlay else Icons.AutoMirrored.Outlined.PlaylistPlayOutlined,
+                    if (settings.autoplayNext) "Desactivar reproducción automática" else "Activar reproducción automática",
+                    tint = if (settings.autoplayNext) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                )
             }
             IconButton(onClick = { refresh() }, enabled = !refreshing) { Icon(Icons.Filled.Refresh, "Actualizar") }
             Box {
@@ -182,9 +215,9 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
         },
         floatingActionButton = {
             if (!selection.active) ExtendedFloatingActionButton(
-                onClick = { nav.navigate(Routes.add()) },
-                icon = { Icon(Icons.Filled.Add, null) },
-                text = { Text("Añadir") },
+                onClick = { playNext() },
+                icon = { Icon(Icons.Filled.PlayArrow, null) },
+                text = { Text("Reproducir") },
             )
         },
     ) { padding ->

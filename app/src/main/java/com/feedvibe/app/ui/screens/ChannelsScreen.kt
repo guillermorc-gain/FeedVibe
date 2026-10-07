@@ -168,6 +168,7 @@ fun ChannelsScreen(nav: NavController, settings: AppSettings) {
 
     ScreenScaffold(
         title = "FeedVibe",
+        brand = true,
         topBarOverride = if (selection.active) {
             { ChannelSelectionBar(selection) }
         } else null,

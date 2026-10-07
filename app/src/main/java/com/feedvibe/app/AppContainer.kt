@@ -12,6 +12,9 @@ import com.feedvibe.app.data.sync.CloudSync
 import com.feedvibe.app.notify.Notifier
 import com.feedvibe.app.update.AppUpdater
 import android.util.Log
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,11 +49,16 @@ class AppContainer(val context: Context) {
             appScope.launch { runCatching { feeds.refreshOne(sub.id) } }
         }
         cloud.onRemoteFullHistory = { sub ->
-            appScope.launch { runCatching { feeds.loadFullHistory(sub.id, markOldWatched = false) } }
+            appScope.launch { runCatching { feeds.loadFullHistory(sub.id, markOldWatched = false, auto = true) } }
         }
         cloud.onRemoteProfile = { nick, photo, stamp ->
             appScope.launch { profile.applyRemote(nick, photo, stamp) }
         }
+        // La sincronización en tiempo real solo funciona con la app a la vista (ahorra batería).
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) = cloud.setForeground(true)
+            override fun onStop(owner: LifecycleOwner) = cloud.setForeground(false)
+        })
         // Arranca/para la sincronización según haya sesión iniciada.
         appScope.launch {
             auth.user.collect { u ->
@@ -63,17 +71,19 @@ class AppContainer(val context: Context) {
 
     /**
      * Tareas al abrir la app:
-     * - Cargar todos los vídeos de los canales de YouTube que solo tienen los últimos (importados…).
-     *   Una vez se recargan también los ya cargados (títulos en español y marca de Shorts).
+     * - Reparar una vez los vídeos antiguos que entraron como «sin ver».
      * - Mantener el número de episodios sin ver en el icono de la app.
      */
     fun startBackgroundJobs() {
         if (backgroundStarted) return
         backgroundStarted = true
         appScope.launch {
-            val reloadAll = !settings.backfillDone()
-            feeds.backfillFullHistory(includeAlreadyLoaded = reloadAll)
-            if (reloadAll) settings.setBackfillDone()
+            if (!settings.repairWatchedDone()) {
+                runCatching { feeds.repairOldUnwatched() }
+                settings.setRepairWatchedDone()
+            }
+            // Ya no se cargan automáticamente todos los vídeos de los canales al abrir: con muchos
+            // canales la app se atascaba. Se hace al añadir un canal o desde su menú.
         }
         appScope.launch {
             combine(feeds.unwatchedCount, settings.settings.map { it.iconBadge }) { n, on -> if (on) n else 0 }

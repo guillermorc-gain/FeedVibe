@@ -1,5 +1,7 @@
 package com.feedvibe.app.ui.screens
 
+import com.feedvibe.app.ui.components.BrandTitle
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -53,7 +55,7 @@ fun AboutScreen(nav: NavController, settings: AppSettings) {
         Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             icon?.let { Image(it, null, Modifier.size(96.dp).clip(RoundedCornerShape(24.dp))) }
             Spacer(Modifier.height(12.dp))
-            Text("FeedVibe", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            BrandTitle(fontSize = 30.sp, showIcon = false)
             Text("Versión ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
             Text("Aplicación desarrollada por Guillermo Ríos Correa", style = MaterialTheme.typography.bodyMedium)

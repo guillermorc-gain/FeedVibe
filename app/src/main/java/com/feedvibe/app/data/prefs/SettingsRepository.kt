@@ -64,9 +64,10 @@ data class AppSettings(
     val refreshOnOpen: Boolean = true,
     val notificationsEnabled: Boolean = true,
     val notifyLive: Boolean = true,
-    val autoMarkOnOpen: Boolean = true,
     val openMode: OpenMode = OpenMode.EXTERNAL,
     val hideShorts: Boolean = false,
+    /** Al terminar un vídeo en el reproductor, pasar solo al siguiente sin ver. */
+    val autoplayNext: Boolean = false,
     val hideWatched: Boolean = true,
     val autoBackupDays: Int = 7,
     val backupKeep: Int = 10,
@@ -108,9 +109,9 @@ class SettingsRepository(private val context: Context) {
         val refreshOnOpen = booleanPreferencesKey("refresh_on_open")
         val notifications = booleanPreferencesKey("notifications")
         val notifyLive = booleanPreferencesKey("notify_live")
-        val autoMark = booleanPreferencesKey("auto_mark")
         val openMode = stringPreferencesKey("open_mode")
         val hideShorts = booleanPreferencesKey("hide_shorts")
+        val autoplayNext = booleanPreferencesKey("autoplay_next")
         val hideWatched = booleanPreferencesKey("hide_watched")
         val autoBackup = intPreferencesKey("auto_backup_days")
         val backupKeep = intPreferencesKey("backup_keep")
@@ -128,6 +129,7 @@ class SettingsRepository(private val context: Context) {
         val iconBadge = booleanPreferencesKey("icon_badge")
         val feedCardWidth = intPreferencesKey("feed_card_width")
         val backfillV2 = booleanPreferencesKey("backfill_v2_done")
+        val repairWatchedV1 = booleanPreferencesKey("repair_watched_v1_done")
         val channelsOnlyUnwatched = booleanPreferencesKey("channels_only_unwatched")
 
         val lastRefresh = longPreferencesKey("last_refresh")
@@ -155,9 +157,9 @@ class SettingsRepository(private val context: Context) {
             refreshOnOpen = p[K.refreshOnOpen] ?: d.refreshOnOpen,
             notificationsEnabled = p[K.notifications] ?: d.notificationsEnabled,
             notifyLive = p[K.notifyLive] ?: d.notifyLive,
-            autoMarkOnOpen = p[K.autoMark] ?: d.autoMarkOnOpen,
             openMode = p.enum(K.openMode, d.openMode),
             hideShorts = p[K.hideShorts] ?: d.hideShorts,
+            autoplayNext = p[K.autoplayNext] ?: d.autoplayNext,
             hideWatched = p[K.hideWatched] ?: d.hideWatched,
             autoBackupDays = p[K.autoBackup] ?: d.autoBackupDays,
             backupKeep = p[K.backupKeep] ?: d.backupKeep,
@@ -195,9 +197,9 @@ class SettingsRepository(private val context: Context) {
             p[K.refreshOnOpen] = n.refreshOnOpen
             p[K.notifications] = n.notificationsEnabled
             p[K.notifyLive] = n.notifyLive
-            p[K.autoMark] = n.autoMarkOnOpen
             p[K.openMode] = n.openMode.name
             p[K.hideShorts] = n.hideShorts
+            p[K.autoplayNext] = n.autoplayNext
             p[K.hideWatched] = n.hideWatched
             p[K.autoBackup] = n.autoBackupDays
             p[K.backupKeep] = n.backupKeep
@@ -240,6 +242,8 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun backfillDone(): Boolean = context.dataStore.data.first()[K.backfillV2] ?: false
     suspend fun setBackfillDone() = context.dataStore.edit { it[K.backfillV2] = true }
+    suspend fun repairWatchedDone(): Boolean = context.dataStore.data.first()[K.repairWatchedV1] ?: false
+    suspend fun setRepairWatchedDone() = context.dataStore.edit { it[K.repairWatchedV1] = true }
 
     val onboardingDone: Flow<Boolean> = context.dataStore.data.map { it[K.onboardingDone] ?: false }
     suspend fun setOnboardingDone() = context.dataStore.edit { it[K.onboardingDone] = true }
