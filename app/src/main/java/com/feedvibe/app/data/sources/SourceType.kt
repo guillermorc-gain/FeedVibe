@@ -41,4 +41,10 @@ data class ParsedEpisode(
 )
 
 /** Error con mensaje legible para el usuario. */
-class SourceException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class SourceException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * La app no puede usar internet ahora (sin conexión, o Android le corta los datos en segundo
+ * plano): no es un fallo del canal.
+ */
+class OfflineException(cause: Throwable? = null) : SourceException("Sin conexión a internet", cause)

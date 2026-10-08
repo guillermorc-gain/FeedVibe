@@ -65,7 +65,8 @@ object YouTubeSource {
 
     suspend fun fetch(key: String, hideShorts: Boolean, fetchChannelInfo: Boolean, apiKey: String = ""): ParsedFeed {
         var rssError: String? = null
-        val feed = runCatching { fetchRssWithFallbacks(key, hideShorts) }.onFailure { rssError = it.message }.getOrNull()
+        val feed = runCatching { fetchRssWithFallbacks(key, hideShorts) }
+            .onFailure { if (it is OfflineException) throw it else rssError = it.message }.getOrNull()
             // Plan B: la API oficial (si hay clave), más fiable que leer la página.
             ?: apiKey.takeIf { it.isNotBlank() }?.let { k ->
                 runCatching { YouTubeApi.fetchLatest(k, key) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { eps ->
@@ -123,6 +124,8 @@ object YouTubeSource {
                     if (feed.episodes.isNotEmpty() || url == urls.last()) return feed
                 } catch (e: SourceException) {
                     last = e
+                    // Sin conexión: los demás intentos fallarían igual.
+                    if (e is OfflineException) throw e
                     // Demasiadas peticiones: insistir solo empeora el bloqueo.
                     if (e.message.orEmpty().contains("429")) throw e
                     if (attempt == 0) kotlinx.coroutines.delay(700)

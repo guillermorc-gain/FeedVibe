@@ -10,6 +10,7 @@ import com.feedvibe.app.BuildConfig
 import com.feedvibe.app.data.sources.ParsedEpisode
 import com.feedvibe.app.data.sources.ParsedFeed
 import com.feedvibe.app.data.sources.SourceException
+import com.feedvibe.app.data.sources.OfflineException
 import com.feedvibe.app.data.sources.YouTubeApi
 import com.feedvibe.app.data.sources.YouTubePage
 import com.feedvibe.app.data.sources.SourceResolver
@@ -220,7 +221,8 @@ class FeedRepository(
             if (sub.fullHistory && existing.isEmpty()) queueFullHistory(sub.id)
             if (firstRefresh || newOnes.isEmpty()) null else NewEpisodes(updatedSub, newOnes)
         } catch (e: Exception) {
-            db.subscriptions().setRefreshResult(sub.id, sub.lastRefreshed, e.message ?: "Error")
+            // Sin conexión no es un fallo del canal: no se le marca con error.
+            if (e !is OfflineException) db.subscriptions().setRefreshResult(sub.id, sub.lastRefreshed, e.message ?: "Error")
             throw e
         }
     }
@@ -240,8 +242,9 @@ class FeedRepository(
                 val youtubeLimiter = Semaphore(3)
                 val errors = AtomicInteger(0)
                 val reasons = java.util.concurrent.ConcurrentHashMap<String, Int>()
-                val results = coroutineScope {
-                    subs.map { sub ->
+                val offline = java.util.concurrent.ConcurrentLinkedQueue<SubscriptionEntity>()
+                suspend fun pass(list: List<SubscriptionEntity>, retrying: Boolean): List<NewEpisodes> = coroutineScope {
+                    list.map { sub ->
                         async {
                             limiter.withPermit {
                                 val run: suspend () -> NewEpisodes? = {
@@ -250,6 +253,11 @@ class FeedRepository(
                                 }
                                 runCatching { if (sub.type == SourceType.YOUTUBE) youtubeLimiter.withPermit { run() } else run() }
                                     .onFailure { e ->
+                                        // Sin conexión: se reintenta al final (la red puede tardar en volver).
+                                        if (e is OfflineException && !retrying) {
+                                            offline.add(sub)
+                                            return@onFailure
+                                        }
                                         errors.incrementAndGet()
                                         val reason = if (e is TimeoutCancellationException) "No ha respondido a tiempo"
                                         else e.message.orEmpty().replace(Regex(" al abrir \\S+"), "").ifBlank { "Error" }
@@ -263,7 +271,13 @@ class FeedRepository(
                         }
                     }.awaitAll().filterNotNull()
                 }
-                if (onlyIds == null) settings.setLastRefresh(System.currentTimeMillis())
+                val results = pass(subs, retrying = false).toMutableList()
+                if (offline.isNotEmpty()) {
+                    com.feedvibe.app.CrashReport.note("Sin conexión en ${offline.size} canales: se reintenta")
+                    kotlinx.coroutines.delay(5_000)
+                    results += pass(offline.toList(), retrying = true)
+                }
+                if (onlyIds == null && offline.size < subs.size) settings.setLastRefresh(System.currentTimeMillis())
                 // Filtrar episodios ya vistos (p. ej. marcados en otro dispositivo).
                 val filtered = results.mapNotNull { n ->
                     val states = db.states().getMany(n.episodes.map { it.id }).associateBy { it.episodeId }

@@ -62,6 +62,8 @@ object Http {
                 }
             } catch (e: SourceException) {
                 throw e
+            } catch (e: java.net.UnknownHostException) {
+                throw OfflineException(e)
             } catch (e: Exception) {
                 throw SourceException("No se pudo conectar: ${e.message ?: e.javaClass.simpleName}", e)
             }
@@ -80,6 +82,8 @@ object Http {
                 }
             } catch (e: SourceException) {
                 throw e
+            } catch (e: java.net.UnknownHostException) {
+                throw OfflineException(e)
             } catch (e: Exception) {
                 throw SourceException("No se pudo conectar: ${e.message ?: e.javaClass.simpleName}", e)
             }
