@@ -34,6 +34,8 @@ object Http {
     val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        // Tiempo máximo de toda la petición (una respuesta que llega a cuentagotas no se eterniza).
+        .callTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
         .cookieJar(consentJar)
         .addInterceptor { chain ->
