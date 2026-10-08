@@ -6,7 +6,29 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Para las listas: todo menos la descripción (las de YouTube son largas y en una lista de miles de
+ * episodios, recargada a cada canal actualizado, llegaban a agotar la memoria). La descripción
+ * solo se carga al abrir un episodio ([EPISODE_FULL_SELECT]).
+ */
 private const val EPISODE_ITEM_SELECT = """
+    SELECT e.id, e.subscriptionId, e.title, '' AS description, e.url, e.mediaUrl, e.mediaType,
+        e.thumbnailUrl, e.publishedAt, e.durationSec, e.isLive, e.isShort, e.discoveredAt,
+        COALESCE(s.watched, 0) AS watched,
+        COALESCE(s.watchLater, 0) AS watchLater,
+        COALESCE(s.favorite, 0) AS favorite,
+        COALESCE(s.positionMs, 0) AS positionMs,
+        COALESCE(s.watchedAt, 0) AS watchedAt,
+        sub.title AS channelTitle,
+        sub.imageUrl AS channelImage,
+        sub.type AS sourceType
+    FROM episodes e
+    JOIN subscriptions sub ON sub.id = e.subscriptionId
+    LEFT JOIN episode_states s ON s.episodeId = e.id
+"""
+
+/** Un episodio completo (con descripción), para el reproductor. */
+private const val EPISODE_FULL_SELECT = """
     SELECT e.*,
         COALESCE(s.watched, 0) AS watched,
         COALESCE(s.watchLater, 0) AS watchLater,
@@ -97,10 +119,10 @@ interface EpisodeDao {
     @Query("$EPISODE_ITEM_SELECT WHERE COALESCE(s.positionMs, 0) > 0 AND COALESCE(s.watched, 0) = 0 AND $SHORTS ORDER BY s.updatedAt DESC")
     fun observeInProgress(hideShorts: Boolean): Flow<List<EpisodeItem>>
 
-    @Query("$EPISODE_ITEM_SELECT WHERE e.id = :id")
+    @Query("$EPISODE_FULL_SELECT WHERE e.id = :id")
     suspend fun getItem(id: String): EpisodeItem?
 
-    @Query("$EPISODE_ITEM_SELECT WHERE e.id = :id")
+    @Query("$EPISODE_FULL_SELECT WHERE e.id = :id")
     fun observeItem(id: String): Flow<EpisodeItem?>
 
     @Query("SELECT id FROM episodes WHERE subscriptionId = :subId")
