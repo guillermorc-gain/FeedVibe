@@ -173,6 +173,7 @@ class SettingsRepository(private val context: Context) {
         val accessCache = stringPreferencesKey("access_cache")
         val appClosed = booleanPreferencesKey("app_closed")
         val radioRecents = stringPreferencesKey("radio_recents")
+        val radioFavoritesAt = longPreferencesKey("radio_favorites_at")
         val profilePhotoVersion = longPreferencesKey("profile_photo_version")
         val onboardingDone = booleanPreferencesKey("onboarding_done")
     }
@@ -303,9 +304,30 @@ class SettingsRepository(private val context: Context) {
     val radioFavorites: Flow<List<com.feedvibe.app.data.radio.Station>> = context.dataStore.data.map { stations(it[K.radioFavorites]) }
     val radioRecents: Flow<List<com.feedvibe.app.data.radio.Station>> = context.dataStore.data.map { stations(it[K.radioRecents]) }
 
-    suspend fun toggleFavoriteStation(s: com.feedvibe.app.data.radio.Station) = context.dataStore.edit { p ->
-        val list = stations(p[K.radioFavorites])
-        p[K.radioFavorites] = stationsJson(if (list.any { it.id == s.id }) list.filter { it.id != s.id } else list + s)
+    /** Cambia una favorita y devuelve (lista en JSON, hora del cambio) para sincronizarla. */
+    suspend fun toggleFavoriteStation(s: com.feedvibe.app.data.radio.Station): Pair<String, Long> {
+        var result = "" to 0L
+        context.dataStore.edit { p ->
+            val list = stations(p[K.radioFavorites])
+            val json = stationsJson(if (list.any { it.id == s.id }) list.filter { it.id != s.id } else list + s)
+            val now = System.currentTimeMillis()
+            p[K.radioFavorites] = json
+            p[K.radioFavoritesAt] = now
+            result = json to now
+        }
+        return result
+    }
+
+    suspend fun radioFavoritesSnapshot(): Pair<String, Long> = context.dataStore.data.first().let {
+        (it[K.radioFavorites] ?: "[]") to (it[K.radioFavoritesAt] ?: 0L)
+    }
+
+    /** Favoritas que llegan de otro dispositivo: solo si son más recientes. */
+    suspend fun applyRemoteRadioFavorites(json: String, at: Long) = context.dataStore.edit { p ->
+        if (at > (p[K.radioFavoritesAt] ?: 0L)) {
+            p[K.radioFavorites] = json
+            p[K.radioFavoritesAt] = at
+        }
     }
 
     /** Grabaciones programadas. */

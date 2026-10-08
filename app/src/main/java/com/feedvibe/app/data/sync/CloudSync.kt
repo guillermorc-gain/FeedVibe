@@ -113,6 +113,8 @@ class CloudSync(
     /** Otro dispositivo cargó el historial completo de un canal: hay que cargarlo aquí también. */
     var onRemoteFullHistory: ((SubscriptionEntity) -> Unit)? = null
     var onRemoteProfile: ((nickname: String?, photoBase64: String?, photoUpdatedAt: Long) -> Unit)? = null
+    /** Favoritas de la radio de otro dispositivo (JSON de la lista y hora del cambio). */
+    var onRemoteRadioFavorites: ((json: String, updatedAt: Long) -> Unit)? = null
 
     private fun userDoc(u: String) = (firestore ?: error("Firestore no disponible")).collection("users").document(u)
 
@@ -162,8 +164,27 @@ class CloudSync(
                     _detail.value = null
                 }
             }
+            // Favoritas de la radio: se combinan una vez (gana lo más reciente) y luego se escuchan.
+            runCatching { syncRadioFavorites(newUid) }.onFailure { Log.w(TAG, "radioFavorites", it) }
             updateListeners()
         }
+    }
+
+    private fun radioFavoritesDoc(u: String) = userDoc(u).collection("radio").document("favorites")
+
+    private suspend fun syncRadioFavorites(u: String) {
+        val remote = radioFavoritesDoc(u).get().await()
+        val remoteAt = remote.getLong("updatedAt") ?: 0
+        val (localJson, localAt) = settings.radioFavoritesSnapshot()
+        when {
+            remoteAt > localAt -> remote.getString("json")?.let { onRemoteRadioFavorites?.invoke(it, remoteAt) }
+            localAt > remoteAt -> pushRadioFavorites(localJson, localAt)
+        }
+    }
+
+    fun pushRadioFavorites(json: String, updatedAt: Long) = safely {
+        val u = uid ?: return@safely
+        track(radioFavoritesDoc(u).set(mapOf("json" to json, "updatedAt" to updatedAt, "serverUpdatedAt" to FieldValue.serverTimestamp())))
     }
 
     private fun explain(e: Throwable): String = when {
@@ -231,6 +252,11 @@ class CloudSync(
                 _status.value = SyncStatus.SYNCED
                 _detail.value = null
             }
+        listeners += radioFavoritesDoc(u).addSnapshotListener { snap, _ ->
+            if (snap == null || !snap.exists() || snap.metadata.hasPendingWrites()) return@addSnapshotListener
+            val json = snap.getString("json") ?: return@addSnapshotListener
+            onRemoteRadioFavorites?.invoke(json, snap.getLong("updatedAt") ?: 0)
+        }
         listeners += userDoc(u).addSnapshotListener { snap, _ ->
             if (snap == null || !snap.exists()) return@addSnapshotListener
             onRemoteProfile?.invoke(

@@ -54,6 +54,9 @@ class AppContainer(val context: Context) {
         cloud.onRemoteFullHistory = { sub ->
             feeds.queueFullHistory(sub.id)
         }
+        cloud.onRemoteRadioFavorites = { json, at ->
+            appScope.launch { settings.applyRemoteRadioFavorites(json, at) }
+        }
         cloud.onRemoteProfile = { nick, photo, stamp ->
             appScope.launch { profile.applyRemote(nick, photo, stamp) }
         }
@@ -72,6 +75,12 @@ class AppContainer(val context: Context) {
                 if (u != null) cloud.start(u.uid) else cloud.stop()
             }
         }
+    }
+
+    /** Añade o quita una emisora favorita y la sincroniza con los otros dispositivos. */
+    fun toggleRadioFavorite(s: com.feedvibe.app.data.radio.Station) = appScope.launch {
+        val (json, at) = settings.toggleFavoriteStation(s)
+        cloud.pushRadioFavorites(json, at)
     }
 
     private var lastOpenCheck = 0L

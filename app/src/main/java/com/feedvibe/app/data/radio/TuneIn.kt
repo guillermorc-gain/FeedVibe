@@ -10,6 +10,8 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import java.net.URLEncoder
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 
@@ -105,8 +107,8 @@ object TuneIn {
         stations(json("${BASE}Browse.ashx?c=local&latlon=${place.lat},${place.lon}")).filter { !it.isShow }
 
     /** Emisoras de varios sitios juntas (p. ej. toda una comunidad), sin repetir. */
-    suspend fun local(places: List<Place>): List<Station> = kotlinx.coroutines.coroutineScope {
-        places.map { p -> kotlinx.coroutines.async { runCatching { local(p) }.getOrDefault(emptyList()) } }
+    suspend fun local(places: List<Place>): List<Station> = coroutineScope {
+        places.map { p -> async { runCatching { local(p) }.getOrDefault(emptyList()) } }
             .flatMap { it.await() }
             .distinctBy { it.id }
     }

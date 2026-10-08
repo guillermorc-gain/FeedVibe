@@ -38,6 +38,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -466,6 +467,28 @@ class RecordAlarmReceiver : BroadcastReceiver() {
         RecordService.start(context, job)
         val app = context.applicationContext as FeedVibeApp
         app.container.appScope.launch { app.container.settings.editRadioSchedules { list -> list.filter { it.id != job.id } } }
+    }
+}
+
+/** Tras reiniciar el móvil las alarmas se borran: se vuelven a poner las grabaciones futuras. */
+class RecordBootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        val app = context.applicationContext as FeedVibeApp
+        val pending = goAsync()
+        app.container.appScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                app.container.settings.editRadioSchedules { list -> list.filter { it.endAtMs > now } }
+                app.container.settings.radioSchedules.first().forEach { job ->
+                    // Si ya debería haber empezado, se graba lo que queda.
+                    if (job.startAtMs <= now) RecordService.start(context, job.copy(startAtMs = 0))
+                    else RecordScheduler.schedule(context, job)
+                }
+            } finally {
+                pending.finish()
+            }
+        }
     }
 }
 

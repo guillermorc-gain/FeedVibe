@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.FiberManualRecord
@@ -245,7 +246,7 @@ fun RadioScreen(nav: NavController, settings: AppSettings) {
 }
 
 private fun kotlinx.coroutines.CoroutineScope.launchToggle(container: com.feedvibe.app.AppContainer, s: Station) =
-    launch { container.settings.toggleFavoriteStation(s) }
+    container.toggleRadioFavorite(s)
 
 private fun Station.quality(): String = buildString {
     if (bitrate > 0) append("$bitrate kbps")
@@ -392,6 +393,23 @@ private fun PlayerSheet(n: NowPlaying, favorite: Boolean, onToggle: () -> Unit, 
                     color = androidx.compose.ui.graphics.Color(0xFFE53935),
                     style = MaterialTheme.typography.labelLarge,
                 )
+            }
+            // Temporizador para dormir: la radio se para sola.
+            val sleepAt by container.radio.sleepAt.collectAsStateWithLifecycle()
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Bedtime, "Temporizador", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                val left = sleepAt?.let { ((it - System.currentTimeMillis()) / 60_000).coerceAtLeast(1) }
+                if (left != null) {
+                    FilterChip(selected = true, onClick = { container.radio.setSleepTimer(null) }, label = { Text("Se apaga en $left min · quitar") })
+                } else {
+                    listOf(15, 30, 45, 60, 90).forEach { m ->
+                        FilterChip(selected = false, onClick = { container.radio.setSleepTimer(m) }, label = { Text("$m min") })
+                    }
+                }
             }
             Text(
                 "Grabar en ${format.label}: 1 hora ≈ ${estimate(3600)}",

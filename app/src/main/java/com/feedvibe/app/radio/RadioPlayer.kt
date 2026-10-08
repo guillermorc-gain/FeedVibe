@@ -88,6 +88,8 @@ class RadioPlayer(
                 val item = MediaItem.Builder()
                     .setUri(stream.url)
                     .setMediaId(station.id)
+                    // El enlace también aquí: al pasar al servicio, el de setUri se pierde.
+                    .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(Uri.parse(stream.url)).build())
                     .setMediaMetadata(
                         MediaMetadata.Builder()
                             .setTitle(station.name)
@@ -106,6 +108,23 @@ class RadioPlayer(
             }.onFailure { e ->
                 _now.value = _now.value?.copy(loading = false, playing = false, error = e.message ?: "No se pudo conectar")
             }
+        }
+    }
+
+    /** Temporizador para dormir: hora a la que se parará (null = sin temporizador). */
+    private val _sleepAt = MutableStateFlow<Long?>(null)
+    val sleepAt: StateFlow<Long?> = _sleepAt.asStateFlow()
+    private var sleepJob: kotlinx.coroutines.Job? = null
+
+    fun setSleepTimer(minutes: Int?) {
+        sleepJob?.cancel()
+        if (minutes == null) { _sleepAt.value = null; return }
+        val at = System.currentTimeMillis() + minutes * 60_000L
+        _sleepAt.value = at
+        sleepJob = scope.launch {
+            kotlinx.coroutines.delay(minutes * 60_000L)
+            _sleepAt.value = null
+            stop()
         }
     }
 
