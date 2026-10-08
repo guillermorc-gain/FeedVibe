@@ -49,7 +49,7 @@ class AppContainer(val context: Context) {
             appScope.launch { runCatching { feeds.refreshOne(sub.id) } }
         }
         cloud.onRemoteFullHistory = { sub ->
-            appScope.launch { runCatching { feeds.loadFullHistory(sub.id, markOldWatched = false, auto = true) } }
+            feeds.queueFullHistory(sub.id)
         }
         cloud.onRemoteProfile = { nick, photo, stamp ->
             appScope.launch { profile.applyRemote(nick, photo, stamp) }

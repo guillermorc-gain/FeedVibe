@@ -33,6 +33,10 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicInteger
 
 data class NewEpisodes(val subscription: SubscriptionEntity, val episodes: List<EpisodeEntity>)
@@ -46,6 +50,28 @@ class FeedRepository(
     private val cloud: CloudSync,
 ) {
     private val refreshMutex = Mutex()
+
+    /**
+     * Cargas automáticas del historial completo (canales que llegan de otro dispositivo o de una
+     * copia): pueden ser miles de vídeos por canal, así que van de una en una y fuera de la
+     * actualización, para no bloquearla (antes la dejaban horas sin terminar) ni agotar la memoria.
+     */
+    private val historyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val historyQueueMutex = Mutex()
+    private val queuedHistory = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    fun queueFullHistory(subId: String) {
+        if (!queuedHistory.add(subId)) return
+        historyScope.launch {
+            try {
+                historyQueueMutex.withLock {
+                    runCatching { loadFullHistory(subId, markOldWatched = false, auto = true) }
+                }
+            } finally {
+                queuedHistory.remove(subId)
+            }
+        }
+    }
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
@@ -189,9 +215,7 @@ class FeedRepository(
             )
             db.subscriptions().upsert(updatedSub)
             // Canal con historial completo que este dispositivo aún no tiene (restaurado, otro móvil…).
-            if (sub.fullHistory && existing.isEmpty()) {
-                runCatching { loadFullHistory(sub.id, markOldWatched = false, auto = true) }
-            }
+            if (sub.fullHistory && existing.isEmpty()) queueFullHistory(sub.id)
             if (firstRefresh || newOnes.isEmpty()) null else NewEpisodes(updatedSub, newOnes)
         } catch (e: Exception) {
             db.subscriptions().setRefreshResult(sub.id, sub.lastRefreshed, e.message ?: "Error")
@@ -213,7 +237,8 @@ class FeedRepository(
                     subs.map { sub ->
                         async {
                             limiter.withPermit {
-                                runCatching { refreshSubscription(sub, hideShorts) }
+                                // Con límite de tiempo: un canal que no responde no bloquea al resto.
+                                runCatching { withTimeout(90_000) { refreshSubscription(sub, hideShorts) } }
                                     .onFailure { errors.incrementAndGet() }
                                     .getOrNull()
                             }
