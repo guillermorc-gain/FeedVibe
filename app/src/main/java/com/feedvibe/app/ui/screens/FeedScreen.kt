@@ -150,7 +150,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
         if (ids.isEmpty()) {
             scope.launch { snackbar.showSnackbar("No hay vídeos de YouTube sin ver en la lista") }
         } else {
-            context.startActivity(YouTubePlayerActivity.intent(context, ids.first(), ids))
+            YouTubePlayerActivity.start(context, ids.first(), ids)
         }
     }
 

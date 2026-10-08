@@ -76,7 +76,7 @@ fun openEpisode(context: Context, container: AppContainer, item: EpisodeItem, na
         val s = container.settings.current()
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
             if (s.openMode == OpenMode.INTERNAL && youtubeVideoId(item) != null) {
-                context.startActivity(YouTubePlayerActivity.intent(context, item.episode.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                YouTubePlayerActivity.start(context, item.episode.id)
             } else {
                 openUrl(context, item.episode.url, s.openMode)
             }

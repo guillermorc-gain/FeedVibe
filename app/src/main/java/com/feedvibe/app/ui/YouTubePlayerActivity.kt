@@ -72,6 +72,12 @@ class YouTubePlayerActivity : ComponentActivity() {
         const val CONTROL_CLOSE = 3
         const val CONTROL_PLAY = 4
         const val CONTROL_PAUSE = 5
+        /** Cargar otro vídeo sin sacar el reproductor de la ventana flotante. */
+        private const val CONTROL_LOAD = 6
+
+        /** El reproductor está en la ventana flotante. */
+        @Volatile
+        private var inPip = false
         /** Se marca como visto cuando faltan estos segundos o menos. */
         private const val WATCHED_REMAINING_SEC = 30.0
 
@@ -99,6 +105,22 @@ class YouTubePlayerActivity : ComponentActivity() {
   } catch (e) {}
 })();
 """
+
+        /**
+         * Abre un vídeo. Si ya hay uno en la ventana flotante, el nuevo sigue en ella (abrir la
+         * actividad la sacaría a pantalla completa).
+         */
+        fun start(context: Context, episodeId: String, queue: List<String> = emptyList()) {
+            if (inPip) {
+                context.sendBroadcast(
+                    controlIntent(context, CONTROL_LOAD)
+                        .putExtra(EXTRA_ID, episodeId)
+                        .putStringArrayListExtra(EXTRA_QUEUE, ArrayList(queue.take(500))),
+                )
+            } else {
+                context.startActivity(intent(context, episodeId, queue).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }
 
         /** [queue]: episodios que siguen (en orden), para el botón «Siguiente». */
         fun intent(context: Context, episodeId: String, queue: List<String> = emptyList()) =
@@ -132,6 +154,10 @@ class YouTubePlayerActivity : ComponentActivity() {
                 CONTROL_CLOSE -> finish()
                 CONTROL_PLAY -> js("player && player.playVideo && player.playVideo()")
                 CONTROL_PAUSE -> js("player && player.pauseVideo && player.pauseVideo()")
+                CONTROL_LOAD -> intent.getStringExtra(EXTRA_ID)?.let { id ->
+                    queue = intent.getStringArrayListExtra(EXTRA_QUEUE).orEmpty()
+                    if (id != episodeId) load(id)
+                }
             }
         }
     }
@@ -322,6 +348,7 @@ class YouTubePlayerActivity : ComponentActivity() {
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPip = isInPictureInPictureMode
         // Si se cierra la ventana flotante (no se amplía), la actividad ya está parada: se cierra.
         if (!isInPictureInPictureMode) {
             if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
@@ -498,6 +525,7 @@ class YouTubePlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        inPip = false
         PlaybackService.stop(this)
         runCatching { unregisterReceiver(controlReceiver) }
         if (::webView.isInitialized) {
@@ -511,10 +539,33 @@ class YouTubePlayerActivity : ComponentActivity() {
     private val chrome = object : WebChromeClient() {
         override fun onShowCustomView(v: View, cb: CustomViewCallback) {
             fullscreenCallback = cb
-            fullscreenView = v
             v.setBackgroundColor(Color.BLACK)
+            // El vídeo a pantalla completa con una X arriba a la derecha para cerrarlo.
+            val dp = resources.displayMetrics.density
+            val close = android.widget.ImageButton(this@YouTubePlayerActivity).apply {
+                setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+                setColorFilter(Color.WHITE)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(Color.argb(110, 0, 0, 0))
+                }
+                contentDescription = "Cerrar vídeo"
+                alpha = 0.85f
+                setOnClickListener {
+                    chrome.onHideCustomView()
+                    finish()
+                }
+            }
+            val frame = FrameLayout(this@YouTubePlayerActivity).apply {
+                setBackgroundColor(Color.BLACK)
+                addView(v, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                addView(close, FrameLayout.LayoutParams((44 * dp).toInt(), (44 * dp).toInt(), android.view.Gravity.TOP or android.view.Gravity.END).apply {
+                    setMargins(0, (16 * dp).toInt(), (16 * dp).toInt(), 0)
+                })
+            }
+            fullscreenView = frame
             (window.decorView as FrameLayout).addView(
-                v, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+                frame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
             )
             WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.systemBars())
         }

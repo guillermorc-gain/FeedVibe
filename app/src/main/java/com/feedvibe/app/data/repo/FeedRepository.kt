@@ -91,6 +91,10 @@ class FeedRepository(
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
+    /** Progreso de la búsqueda de episodios nuevos: (canales hechos, total); null si no se busca. */
+    private val _refreshProgress = MutableStateFlow<Pair<Int, Int>?>(null)
+    val refreshProgress: StateFlow<Pair<Int, Int>?> = _refreshProgress.asStateFlow()
+
     /** Canales cargando su historial completo -> vídeos cargados hasta ahora. */
     private val _historyProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
     val historyProgress: StateFlow<Map<String, Int>> = _historyProgress.asStateFlow()
@@ -282,10 +286,12 @@ class FeedRepository(
                                         failed[sub.title.ifBlank { sub.sourceKey }] = reason.take(120)
                                     }
                                     .getOrNull()
+                                    .also { if (!retrying) _refreshProgress.update { p -> p?.let { it.first + 1 to it.second } } }
                             }
                         }
                     }.awaitAll().filterNotNull()
                 }
+                _refreshProgress.value = 0 to subs.size
                 val results = pass(subs, retrying = false).toMutableList()
                 if (offline.isNotEmpty()) {
                     com.feedvibe.app.CrashReport.note("Sin conexión en ${offline.size} canales: se reintenta")
@@ -304,6 +310,7 @@ class FeedRepository(
                 RefreshResult(filtered, errors.get(), reasons.maxByOrNull { it.value }?.key, failed.toMap())
             } finally {
                 _refreshing.value = false
+                _refreshProgress.value = null
             }
         }
     }

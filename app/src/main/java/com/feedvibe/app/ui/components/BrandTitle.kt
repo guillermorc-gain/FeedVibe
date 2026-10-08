@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toBitmap
 import com.feedvibe.app.R
+import com.feedvibe.app.data.sync.SyncDirection
 
 /** Colores sacados del icono de la app. */
 private object BrandColors {
@@ -66,7 +67,7 @@ private object BrandColors {
 /**
  * «FeedVibe» con el icono y los degradados del logotipo.
  * @param refreshing buscando episodios nuevos: una luz del color del tema palpita detrás.
- * @param syncing sincronizando con otros dispositivos: caen flechas hacia el título.
+ * @param sync sincronizando: flechas que suben (se envía) o caen hacia el título (se recibe).
  */
 @Composable
 fun BrandTitle(
@@ -74,7 +75,7 @@ fun BrandTitle(
     fontSize: TextUnit = 26.sp,
     showIcon: Boolean = true,
     refreshing: Boolean = false,
-    syncing: Boolean = false,
+    sync: SyncDirection? = null,
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val transition = rememberInfiniteTransition(label = "actividad")
@@ -108,21 +109,31 @@ fun BrandTitle(
                     center = center,
                 )
             }
-        } else if (syncing) {
+        } else if (sync != null) {
+            val up = sync == SyncDirection.UP
             val arrows = 7
             val stroke = 2.dp.toPx()
             val len = size.height * 0.45f
             val head = len * 0.35f
             for (i in 0 until arrows) {
-                // Cada flecha cae con un desfase distinto, de arriba hacia el título.
+                // Cada flecha con un desfase distinto: caen hacia el título al recibir y salen
+                // hacia arriba desde él al enviar.
                 val phase = (rain + i * 0.37f) % 1f
                 val x = size.width * (i + 0.5f) / arrows + ((i * 13) % 7 - 3) * 2f
-                val y = -size.height * 0.9f + phase * size.height * 1.4f
+                val travel = phase * size.height * 1.4f
                 val alpha = kotlin.math.sin(phase * Math.PI).toFloat() * 0.9f
                 val c = accent.copy(alpha = alpha)
-                drawLine(c, Offset(x, y - len), Offset(x, y), stroke, StrokeCap.Round)
-                drawLine(c, Offset(x - head, y - head), Offset(x, y), stroke, StrokeCap.Round)
-                drawLine(c, Offset(x + head, y - head), Offset(x, y), stroke, StrokeCap.Round)
+                if (up) {
+                    val y = size.height * 0.5f - travel   // punta de la flecha
+                    drawLine(c, Offset(x, y + len), Offset(x, y), stroke, StrokeCap.Round)
+                    drawLine(c, Offset(x - head, y + head), Offset(x, y), stroke, StrokeCap.Round)
+                    drawLine(c, Offset(x + head, y + head), Offset(x, y), stroke, StrokeCap.Round)
+                } else {
+                    val y = -size.height * 0.9f + travel
+                    drawLine(c, Offset(x, y - len), Offset(x, y), stroke, StrokeCap.Round)
+                    drawLine(c, Offset(x - head, y - head), Offset(x, y), stroke, StrokeCap.Round)
+                    drawLine(c, Offset(x + head, y - head), Offset(x, y), stroke, StrokeCap.Round)
+                }
             }
         }
     }

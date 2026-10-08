@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +34,9 @@ import kotlinx.coroutines.tasks.await
 import java.util.Date
 
 enum class SyncStatus { OFF, CONNECTING, SYNCED, ERROR }
+
+/** Hacia dónde va la información ahora mismo: se sube (UP) o se recibe de otro dispositivo (DOWN). */
+enum class SyncDirection { UP, DOWN }
 
 /**
  * Sincronización en tiempo real entre dispositivos con Cloud Firestore.
@@ -62,19 +66,29 @@ class CloudSync(
     private val _status = MutableStateFlow(SyncStatus.OFF)
     val status: StateFlow<SyncStatus> = _status.asStateFlow()
 
-    /** Trabajos de sincronización en marcha (subidas pendientes, cambios recibidos…). */
-    private val _activity = MutableStateFlow(0)
+    /** Subidas pendientes de confirmar y cambios recibidos que se están aplicando. */
+    private val _uploading = MutableStateFlow(0)
+    private val _receiving = MutableStateFlow(0)
 
-    /** Se está sincronizando ahora mismo (para la animación del título). */
-    val syncing: Flow<Boolean> = combine(_status, _activity) { st, n -> st == SyncStatus.CONNECTING || n > 0 }
-        .distinctUntilChanged()
+    /** Hacia dónde va la información ahora mismo (para la animación del título); null si nada. */
+    val direction: Flow<SyncDirection?> = combine(_status, _uploading, _receiving) { st, up, down ->
+        when {
+            up > 0 -> SyncDirection.UP
+            down > 0 || st == SyncStatus.CONNECTING -> SyncDirection.DOWN
+            else -> null
+        }
+    }.distinctUntilChanged()
 
+    /** Se está sincronizando ahora mismo. */
+    val syncing: Flow<Boolean> = direction.map { it != null }.distinctUntilChanged()
+
+    /** Aplicando cambios que llegan de otro dispositivo. */
     private suspend fun <T> busy(block: suspend () -> T): T {
-        _activity.update { it + 1 }
+        _receiving.update { it + 1 }
         try {
             return block()
         } finally {
-            _activity.update { it - 1 }
+            _receiving.update { it - 1 }
         }
     }
 
@@ -84,8 +98,8 @@ class CloudSync(
      */
     private fun track(task: com.google.android.gms.tasks.Task<*>) {
         val done = java.util.concurrent.atomic.AtomicBoolean(false)
-        fun finish() { if (done.compareAndSet(false, true)) _activity.update { it - 1 } }
-        _activity.update { it + 1 }
+        fun finish() { if (done.compareAndSet(false, true)) _uploading.update { it - 1 } }
+        _uploading.update { it + 1 }
         task.addOnCompleteListener { finish() }
         scope.launch { delay(10_000); finish() }
     }

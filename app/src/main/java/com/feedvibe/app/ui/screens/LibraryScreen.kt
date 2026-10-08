@@ -62,14 +62,14 @@ fun LibraryScreen(nav: NavController, settings: AppSettings) {
     val callbacks = rememberEpisodeCallbacks(nav)
 
     val tabs = listOf(
-        Triple("Más tarde", Icons.Filled.Schedule, later),
         Triple("En curso", Icons.Filled.PlayCircle, progress),
+        Triple("Más tarde", Icons.Filled.Schedule, later),
         Triple("Favoritos", Icons.Filled.Favorite, favs),
         Triple("Historial", Icons.Filled.History, history),
     )
     val empty = listOf(
+        "Los vídeos y podcasts que empieces a ver aparecerán aquí.",
         "Desliza un episodio hacia la izquierda para guardarlo aquí.",
-        "Los podcasts que empieces a escuchar aparecerán aquí.",
         "Marca episodios como favoritos desde su menú.",
         "Aquí verás lo último que has marcado como visto.",
     )

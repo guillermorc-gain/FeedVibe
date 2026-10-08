@@ -22,7 +22,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -120,12 +120,25 @@ class AppContainer(val context: Context) {
             // canales la app se atascaba. Se hace al añadir un canal o desde su menú.
         }
         appScope.launch {
-            combine(feeds.unwatchedCount, settings.settings.map { it.iconBadge }, settings.appClosed) { n, on, closed ->
-                if (on && !closed) n else 0
+            // Aviso fijo (y número del icono): «N episodios disponibles», con barra de progreso
+            // mientras se buscan episodios nuevos y animado mientras se sincroniza.
+            combine(
+                feeds.unwatchedCount,
+                settings.settings.map { it.iconBadge },
+                settings.appClosed,
+                feeds.refreshProgress,
+                cloud.syncing,
+            ) { n, on, closed, progress, syncing ->
+                if (closed) com.feedvibe.app.notify.BadgeState(0, null, false)
+                else com.feedvibe.app.notify.BadgeState(if (on) n else 0, progress, syncing)
             }
                 .distinctUntilChanged()
-                .debounce(1500)
-                .collect { notifier.updateBadge(it) }
+                .conflate()
+                .collect {
+                    notifier.updateBadge(it)
+                    // Como mucho una actualización por segundo (Android limita las notificaciones).
+                    kotlinx.coroutines.delay(1000)
+                }
         }
     }
 

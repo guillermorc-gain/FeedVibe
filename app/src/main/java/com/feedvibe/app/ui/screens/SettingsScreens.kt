@@ -329,10 +329,22 @@ fun NotificationsScreen(nav: NavController, settings: AppSettings) {
                 },
             )
         }
-        if (subs.isNotEmpty()) {
+        // Los canales en pausa no se actualizan, así que no avisan: no se muestran aquí.
+        val active = subs.filter { !it.subscription.paused }
+        if (active.isNotEmpty()) {
             SectionTitle("Por canal")
             SettingsGroup {
-                subs.forEach { s ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    fun setAll(on: Boolean) = scope.launch {
+                        active.filter { it.subscription.notify != on }.forEach { container.feeds.updateSubscription(it.subscription.copy(notify = on)) }
+                    }
+                    OutlinedButton(onClick = { setAll(true) }, enabled = settings.notificationsEnabled, modifier = Modifier.weight(1f)) { Text("Todos") }
+                    OutlinedButton(onClick = { setAll(false) }, enabled = settings.notificationsEnabled, modifier = Modifier.weight(1f)) { Text("Ninguno") }
+                }
+                active.forEach { s ->
                     ListItem(
                         headlineContent = { Text(s.subscription.title) },
                         leadingContent = { ChannelAvatar(s.subscription.imageUrl, s.subscription.title, 36.dp) },

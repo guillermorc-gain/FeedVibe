@@ -161,18 +161,30 @@ class Notifier(private val context: Context) {
     /** App cerrada del todo: fuera los avisos de episodios y el número del icono. */
     fun clearAll() {
         runCatching { NotificationManagerCompat.from(context).cancelAll() }
-        updateBadge(0)
+        updateBadge(BadgeState(0, null, false))
     }
 
     @SuppressLint("MissingPermission")
-    fun updateBadge(count: Int) {
+    fun updateBadge(state: BadgeState) {
         val nm = NotificationManagerCompat.from(context)
-        if (count <= 0 || !canPost()) {
+        val count = state.count
+        val progress = state.progress
+        if ((count <= 0 && progress == null) || !canPost()) {
             nm.cancel(BADGE_ID)
         } else {
-            val n = NotificationCompat.Builder(context, CHANNEL_BADGE)
-                .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle("$count sin ver")
+            val b = NotificationCompat.Builder(context, CHANNEL_BADGE)
+            when {
+                // Iconos animados del sistema: se mueven mientras busca o sincroniza.
+                progress != null -> b.setSmallIcon(android.R.drawable.stat_sys_download)
+                    .setContentTitle("Buscando nuevos episodios… (${progress.first} de ${progress.second})")
+                    .setProgress(progress.second.coerceAtLeast(1), progress.first, false)
+                state.syncing -> b.setSmallIcon(android.R.drawable.stat_notify_sync)
+                    .setContentTitle("$count episodios disponibles")
+                    .setContentText("Sincronizando…")
+                else -> b.setSmallIcon(R.drawable.ic_notification)
+                    .setContentTitle(if (count == 1) "1 episodio disponible" else "$count episodios disponibles")
+            }
+            val n = b
                 .setNumber(count)
                 .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
                 .setPriority(NotificationCompat.PRIORITY_MIN)
@@ -193,3 +205,6 @@ class Notifier(private val context: Context) {
         }
     }
 }
+
+/** Lo que muestra el aviso fijo: episodios sin ver, progreso de la búsqueda y si sincroniza. */
+data class BadgeState(val count: Int, val progress: Pair<Int, Int>?, val syncing: Boolean)
