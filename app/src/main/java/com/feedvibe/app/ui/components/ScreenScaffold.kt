@@ -51,8 +51,11 @@ fun ScreenScaffold(
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    // Solo si hay barra propia que se oculta al hacer scroll: sin barra, el comportamiento se
+    // quedaba con todo el desplazamiento y las listas no se movían.
+    val collapsingBar = topBarOverride == null && !(brand && titleContent == null)
     Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        modifier = if (collapsingBar) Modifier.nestedScroll(scrollBehavior.nestedScrollConnection) else Modifier,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = floatingActionButton,
