@@ -79,6 +79,7 @@ import com.feedvibe.app.ui.components.ScreenScaffold
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 /** Qué lista se está viendo. */
 private sealed interface RadioList {
@@ -245,7 +246,7 @@ fun RadioScreen(nav: NavController, settings: AppSettings) {
 }
 
 private fun kotlinx.coroutines.CoroutineScope.launchToggle(container: com.feedvibe.app.AppContainer, s: Station) =
-    kotlinx.coroutines.launch { container.settings.toggleFavoriteStation(s) }
+    launch { container.settings.toggleFavoriteStation(s) }
 
 private fun Station.quality(): String = buildString {
     if (bitrate > 0) append("$bitrate kbps")
