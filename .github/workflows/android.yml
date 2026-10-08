@@ -1,8 +1,10 @@
 name: Android
 
 on:
+  # Solo main: si se compila también la rama de trabajo, las dos compiten por la única máquina
+  # macOS gratuita y la publicación se queda en cola hasta cancelarse.
   push:
-    branches: ["**"]
+    branches: ["main"]
   pull_request:
   workflow_dispatch:
     inputs:
