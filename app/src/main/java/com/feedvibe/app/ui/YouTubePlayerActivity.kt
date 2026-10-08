@@ -133,6 +133,8 @@ class YouTubePlayerActivity : ComponentActivity() {
     private var episodeId = ""
     private var queue: List<String> = emptyList()
     private lateinit var webView: WebView
+    private lateinit var videoBox: FrameLayout
+    private lateinit var videoClose: View
     private lateinit var details: ScrollView
     private lateinit var status: TextView
     private var fullscreenView: View? = null
@@ -178,12 +180,19 @@ class YouTubePlayerActivity : ComponentActivity() {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             WebViewCompat.addDocumentStartJavaScript(webView, KEEP_VISIBLE_JS, setOf("*"))
         }
+        // El vídeo con una X encima (solo a pantalla completa) para cerrarlo.
+        videoClose = closeButton()
+        videoBox = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(videoClose, closeButtonParams())
+        }
         status = text(13f, Color.LTGRAY)
         details = ScrollView(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.BLACK)
-            addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0))
+            addView(videoBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0))
             addView(details, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         }
         setContentView(root)
@@ -381,7 +390,8 @@ class YouTubePlayerActivity : ComponentActivity() {
     private fun applyLayout() {
         val pip = isInPictureInPictureMode
         val onlyVideo = pip || resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val lp = webView.layoutParams as LinearLayout.LayoutParams
+        videoClose.visibility = if (onlyVideo && !pip) View.VISIBLE else View.GONE
+        val lp = videoBox.layoutParams as LinearLayout.LayoutParams
         if (onlyVideo) {
             lp.height = 0
             lp.weight = 1f
@@ -389,7 +399,7 @@ class YouTubePlayerActivity : ComponentActivity() {
             lp.height = resources.displayMetrics.widthPixels * 9 / 16
             lp.weight = 0f
         }
-        webView.layoutParams = lp
+        videoBox.layoutParams = lp
         details.visibility = if (onlyVideo) View.GONE else View.VISIBLE
         if (pip) return
         val controller = WindowCompat.getInsetsController(window, window.decorView)
@@ -535,33 +545,40 @@ class YouTubePlayerActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    /**
+     * X para cerrar el vídeo a pantalla completa. Arriba a la izquierda: a la derecha están los
+     * botones de YouTube (volumen, subtítulos, ajustes).
+     */
+    private fun closeButton() = android.widget.ImageButton(this).apply {
+        setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+        setColorFilter(Color.WHITE)
+        background = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(Color.argb(130, 0, 0, 0))
+        }
+        contentDescription = "Cerrar vídeo"
+        alpha = 0.9f
+        setOnClickListener {
+            if (fullscreenView != null) chrome.onHideCustomView()
+            finish()
+        }
+    }
+
+    private fun closeButtonParams() = FrameLayout.LayoutParams(dp(44), dp(44), android.view.Gravity.TOP or android.view.Gravity.START).apply {
+        setMargins(dp(16), dp(56), 0, 0)
+    }
+
     // Pantalla completa pedida desde el propio reproductor.
     private val chrome: WebChromeClient = object : WebChromeClient() {
         override fun onShowCustomView(v: View, cb: CustomViewCallback) {
             fullscreenCallback = cb
             v.setBackgroundColor(Color.BLACK)
-            // El vídeo a pantalla completa con una X arriba a la derecha para cerrarlo.
-            val dp = resources.displayMetrics.density
-            val close = android.widget.ImageButton(this@YouTubePlayerActivity).apply {
-                setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
-                setColorFilter(Color.WHITE)
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setColor(Color.argb(110, 0, 0, 0))
-                }
-                contentDescription = "Cerrar vídeo"
-                alpha = 0.85f
-                setOnClickListener {
-                    chrome.onHideCustomView()
-                    finish()
-                }
-            }
+            // El vídeo a pantalla completa con una X para cerrarlo.
+            val close = closeButton()
             val frame = FrameLayout(this@YouTubePlayerActivity).apply {
                 setBackgroundColor(Color.BLACK)
                 addView(v, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-                addView(close, FrameLayout.LayoutParams((44 * dp).toInt(), (44 * dp).toInt(), android.view.Gravity.TOP or android.view.Gravity.END).apply {
-                    setMargins(0, (16 * dp).toInt(), (16 * dp).toInt(), 0)
-                })
+                addView(close, closeButtonParams())
             }
             fullscreenView = frame
             (window.decorView as FrameLayout).addView(
