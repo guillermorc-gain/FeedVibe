@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Radio
+import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
@@ -112,7 +114,12 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     modifier = Modifier.clickable { nav.navigate(Routes.ACCOUNT) },
                 )
+                // Solo en modo radio (se activa tocando el título de la app).
+                if (settings.radioMode) {
+                    SettingsLink(Icons.Filled.Radio, "Radio", "Calidad, grabaciones y descargas") { nav.navigate(Routes.RADIO_SETTINGS) }
+                }
                 SettingsLink(Icons.Filled.Palette, "Apariencia", "Tema, colores y estilo de lista") { nav.navigate(Routes.APPEARANCE) }
+                SettingsLink(Icons.Filled.Tab, "Pestañas", "Ordenar las pestañas de abajo") { nav.navigate(Routes.TABS) }
                 SettingsLink(Icons.Filled.Sync, "Sincronización", "Periodo de actualización y dispositivos") { nav.navigate(Routes.SYNC) }
                 SettingsLink(Icons.Filled.Notifications, "Notificaciones", "Avisos de episodios nuevos y directos") { nav.navigate(Routes.NOTIFICATIONS) }
                 SettingsLink(Icons.Filled.PlayCircle, "Reproducción", "Cómo se abren los vídeos, Shorts…") { nav.navigate(Routes.PLAYBACK) }

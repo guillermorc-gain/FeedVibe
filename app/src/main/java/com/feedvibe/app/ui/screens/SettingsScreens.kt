@@ -119,7 +119,7 @@ fun <T> RadioRow(label: String, value: T, selected: T, onSelect: (T) -> Unit) {
 }
 
 @Composable
-private fun rememberUpdate(): ((AppSettings) -> AppSettings) -> Unit {
+fun rememberUpdate(): ((AppSettings) -> AppSettings) -> Unit {
     val container = LocalContainer.current
     val scope = rememberCoroutineScope()
     return { t -> scope.launch { container.settings.update(t) } }

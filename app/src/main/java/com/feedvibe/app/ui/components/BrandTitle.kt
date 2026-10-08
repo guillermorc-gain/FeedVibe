@@ -76,6 +76,8 @@ fun BrandTitle(
     showIcon: Boolean = true,
     refreshing: Boolean = false,
     sync: SyncDirection? = null,
+    /** Modo radio: el icono de la izquierda pasa a ser una radio del mismo estilo. */
+    radio: Boolean = false,
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val transition = rememberInfiniteTransition(label = "actividad")
@@ -138,16 +140,16 @@ fun BrandTitle(
         }
     }
     Box(modifier.then(effects), contentAlignment = Alignment.Center) {
-        BrandLogo(fontSize = fontSize, showIcon = showIcon)
+        BrandLogo(fontSize = fontSize, showIcon = showIcon, radio = radio)
     }
 }
 
 @Composable
-private fun BrandLogo(fontSize: TextUnit, showIcon: Boolean) {
+private fun BrandLogo(fontSize: TextUnit, showIcon: Boolean, radio: Boolean) {
     val modifier = Modifier
     val context = LocalContext.current
-    val icon = remember {
-        ContextCompat.getDrawable(context, R.mipmap.ic_launcher)?.toBitmap(128, 128)?.asImageBitmap()
+    val icon = remember(radio) {
+        ContextCompat.getDrawable(context, if (radio) R.drawable.ic_radio_logo else R.mipmap.ic_launcher)?.toBitmap(128, 128)?.asImageBitmap()
     }
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     // En modo oscuro el azul profundo del icono apenas se ve: se aclara el degradado.

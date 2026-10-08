@@ -44,6 +44,7 @@ class AppContainer(val context: Context) {
     val drive = DriveBackup(context)
     val notifier = Notifier(context)
     val updater = AppUpdater(context)
+    val radio = com.feedvibe.app.radio.RadioPlayer(context, settings, appScope)
     val access = com.feedvibe.app.data.access.AccessManager(auth, settings, appScope, updater.currentVersion)
 
     init {

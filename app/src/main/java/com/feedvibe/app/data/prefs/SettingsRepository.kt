@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 
 private val Context.dataStore by preferencesDataStore("settings")
 
@@ -107,8 +109,6 @@ data class AppSettings(
     val radioRecordFolder: String = "",
     /** Grabar solo con Wi‑Fi. */
     val radioRecordWifiOnly: Boolean = false,
-    /** Emisoras favoritas (JSON). */
-    val radioFavorites: String = "",
     /** Últimos filtros de la radio: comunidad. */
     val radioState: String = "",
     /** Últimos filtros de la radio: estilo. */
@@ -168,6 +168,7 @@ class SettingsRepository(private val context: Context) {
         val firestoreQueueDropped = booleanPreferencesKey("firestore_queue_dropped")
         val accessCache = stringPreferencesKey("access_cache")
         val appClosed = booleanPreferencesKey("app_closed")
+        val radioRecents = stringPreferencesKey("radio_recents")
         val profilePhotoVersion = longPreferencesKey("profile_photo_version")
         val onboardingDone = booleanPreferencesKey("onboarding_done")
     }
@@ -214,7 +215,6 @@ class SettingsRepository(private val context: Context) {
             radioQuality = p[K.radioQuality] ?: d.radioQuality,
             radioRecordFolder = p[K.radioRecordFolder] ?: d.radioRecordFolder,
             radioRecordWifiOnly = p[K.radioRecordWifiOnly] ?: d.radioRecordWifiOnly,
-            radioFavorites = p[K.radioFavorites] ?: d.radioFavorites,
             radioState = p[K.radioState] ?: d.radioState,
             radioTag = p[K.radioTag] ?: d.radioTag,
         )
@@ -263,7 +263,6 @@ class SettingsRepository(private val context: Context) {
             p[K.radioQuality] = n.radioQuality
             p[K.radioRecordFolder] = n.radioRecordFolder
             p[K.radioRecordWifiOnly] = n.radioRecordWifiOnly
-            p[K.radioFavorites] = n.radioFavorites
             p[K.radioState] = n.radioState
             p[K.radioTag] = n.radioTag
         }
@@ -286,6 +285,27 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun firestoreQueueDropped(): Boolean = context.dataStore.data.first()[K.firestoreQueueDropped] == true
     suspend fun setFirestoreQueueDropped() = context.dataStore.edit { it[K.firestoreQueueDropped] = true }
+    // ---------- Radio: favoritas y escuchadas hace poco ----------
+
+    private fun stations(json: String?): List<com.feedvibe.app.data.radio.Station> =
+        if (json.isNullOrBlank()) emptyList()
+        else runCatching { com.feedvibe.app.data.sources.AppJson.decodeFromString<List<com.feedvibe.app.data.radio.Station>>(json) }.getOrDefault(emptyList())
+
+    private fun stationsJson(list: List<com.feedvibe.app.data.radio.Station>) =
+        com.feedvibe.app.data.sources.AppJson.encodeToString(list)
+
+    val radioFavorites: Flow<List<com.feedvibe.app.data.radio.Station>> = context.dataStore.data.map { stations(it[K.radioFavorites]) }
+    val radioRecents: Flow<List<com.feedvibe.app.data.radio.Station>> = context.dataStore.data.map { stations(it[K.radioRecents]) }
+
+    suspend fun toggleFavoriteStation(s: com.feedvibe.app.data.radio.Station) = context.dataStore.edit { p ->
+        val list = stations(p[K.radioFavorites])
+        p[K.radioFavorites] = stationsJson(if (list.any { it.id == s.id }) list.filter { it.id != s.id } else list + s)
+    }
+
+    suspend fun addRecentStation(s: com.feedvibe.app.data.radio.Station) = context.dataStore.edit { p ->
+        p[K.radioRecents] = stationsJson((listOf(s) + stations(p[K.radioRecents]).filter { it.id != s.id }).take(20))
+    }
+
     /** La app se cerró del todo: no se muestran avisos ni número en el icono hasta abrirla. */
     val appClosed: Flow<Boolean> = context.dataStore.data.map { it[K.appClosed] == true }
     suspend fun setAppClosed(v: Boolean) = context.dataStore.edit { it[K.appClosed] = v }

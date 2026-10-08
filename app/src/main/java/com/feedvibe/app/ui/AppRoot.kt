@@ -28,6 +28,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.NewReleases
+import androidx.compose.material.icons.filled.Radio
+import androidx.compose.material.icons.outlined.Radio
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.outlined.AccountCircle
@@ -91,6 +94,9 @@ object Routes {
     const val CHANNELS = "channels"
     const val LIBRARY = "library"
     const val PROFILE = "profile"
+    const val RADIO = "radio"
+    const val TABS = "settings/tabs"
+    const val RADIO_SETTINGS = "settings/radio"
     const val CHANNEL = "channel/{id}"
     const val ADD = "add?url={url}"
     const val PLAYER = "player/{id}"
@@ -109,19 +115,29 @@ object Routes {
     fun player(id: String) = "player/$id"
 }
 
-private data class Tab(val route: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
+data class Tab(val route: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
 
-private val tabs = listOf(
+/** Todas las pestañas posibles (la de Radio solo en modo radio). */
+val ALL_TABS = listOf(
     Tab(Routes.FEED, "Novedades", Icons.Outlined.NewReleases, Icons.Filled.NewReleases),
     Tab(Routes.CHANNELS, "Canales", Icons.Outlined.Subscriptions, Icons.Filled.Subscriptions),
+    Tab(Routes.RADIO, "Radio", Icons.Outlined.Radio, Icons.Filled.Radio),
     Tab(Routes.LIBRARY, "Biblioteca", Icons.Outlined.VideoLibrary, Icons.Filled.VideoLibrary),
     Tab(Routes.PROFILE, "Perfil", Icons.Outlined.AccountCircle, Icons.Filled.AccountCircle),
 )
 
+/** Pestañas en el orden elegido (Ajustes → Pestañas); las que falten van al final. */
+fun orderedTabs(order: String): List<Tab> {
+    val byRoute = ALL_TABS.associateBy { it.route }
+    val chosen = order.split(',').map { it.trim() }.mapNotNull { byRoute[it] }.distinct()
+    return chosen + ALL_TABS.filter { it !in chosen }
+}
+
+fun visibleTabs(settings: AppSettings) = orderedTabs(settings.tabOrder).filter { it.route != Routes.RADIO || settings.radioMode }
+
 /** Petición de cambio de pestaña desde otras pantallas (p. ej. «Ver mis canales»). */
 object HomeTabs {
-    val requested = mutableStateOf<Int?>(null)
-    fun indexOf(route: String) = tabs.indexOfFirst { it.route == route }.coerceAtLeast(0)
+    val requested = mutableStateOf<String?>(null)
 }
 
 @Composable
@@ -182,6 +198,8 @@ fun AppRoot(settings: AppSettings, external: ExternalRequest?, onExternalHandled
         composable(Routes.PLAYBACK) { Detail { PlaybackScreen(nav, settings) } }
         composable(Routes.ABOUT) { Detail { AboutScreen(nav, settings) } }
         composable(Routes.ACCOUNT) { Detail { com.feedvibe.app.ui.screens.AccountScreen(nav, settings) } }
+        composable(Routes.TABS) { Detail { com.feedvibe.app.ui.screens.TabsScreen(nav, settings) } }
+        composable(Routes.RADIO_SETTINGS) { Detail { com.feedvibe.app.ui.screens.RadioSettingsScreen(nav, settings) } }
         composable(Routes.USERS) { Detail { com.feedvibe.app.ui.screens.UsersScreen(nav) } }
         composable(Routes.IMPORT_OPML) { Detail { ImportOpmlScreen(nav) } }
     }
@@ -209,7 +227,9 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
     // Animación del título: buscando episodios nuevos / sincronizando.
     val refreshing by container.feeds.refreshing.collectAsStateWithLifecycle()
     val syncDirection by container.cloud.direction.collectAsStateWithLifecycle(null)
-    val start = remember { val half = Int.MAX_VALUE / 2; half - half % tabs.size }
+    val tabs = remember(settings.tabOrder, settings.radioMode) { visibleTabs(settings) }
+    // Empieza en un múltiplo de 60 (divisible por 4 y por 5 pestañas): la primera pestaña.
+    val start = remember { val half = Int.MAX_VALUE / 2; half - half % 60 }
     val pager = rememberPagerState(initialPage = start) { Int.MAX_VALUE }
     val current = Math.floorMod(pager.currentPage, tabs.size)
     LaunchedEffect(current) { com.feedvibe.app.CrashReport.note("Pestaña $current") }
@@ -222,16 +242,38 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
     }
 
     val requested by HomeTabs.requested
-    LaunchedEffect(requested) {
+    LaunchedEffect(requested, tabs) {
         val r = requested ?: return@LaunchedEffect
-        goTo(r)
+        val index = tabs.indexOfFirst { it.route == r }
+        if (index < 0) return@LaunchedEffect
+        goTo(index)
         HomeTabs.requested.value = null
+    }
+
+    /** Tocar el título cambia entre FeedVibe y el modo radio (aparece la pestaña Radio). */
+    fun toggleRadio() {
+        val on = !settings.radioMode
+        val showing = tabs.getOrNull(current)?.route
+        HomeTabs.requested.value = if (on) Routes.RADIO else showing?.takeIf { it != Routes.RADIO } ?: Routes.FEED
+        scope.launch { container.settings.update { it.copy(radioMode = on) } }
     }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         // Título fijo en todas las pestañas: al deslizar solo se mueve lo de debajo.
-        topBar = { CenterAlignedTopAppBar(title = { BrandTitle(refreshing = refreshing, sync = syncDirection) }) },
+        topBar = {
+            CenterAlignedTopAppBar(title = {
+                BrandTitle(
+                    refreshing = refreshing,
+                    sync = syncDirection,
+                    radio = settings.radioMode,
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                    ) { toggleRadio() },
+                )
+            })
+        },
         bottomBar = {
             NavigationBar {
                 tabs.forEachIndexed { index, tab ->
@@ -258,10 +300,11 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
             beyondViewportPageCount = 0,
         ) { page ->
             androidx.compose.runtime.CompositionLocalProvider(LocalTopBarInsets provides WindowInsets(0, 0, 0, 0)) {
-                when (Math.floorMod(page, tabs.size)) {
-                    0 -> FeedScreen(nav, settings)
-                    1 -> ChannelsScreen(nav, settings)
-                    2 -> LibraryScreen(nav, settings)
+                when (tabs[Math.floorMod(page, tabs.size)].route) {
+                    Routes.FEED -> FeedScreen(nav, settings)
+                    Routes.CHANNELS -> ChannelsScreen(nav, settings)
+                    Routes.RADIO -> com.feedvibe.app.ui.screens.RadioScreen(nav, settings)
+                    Routes.LIBRARY -> LibraryScreen(nav, settings)
                     else -> ProfileScreen(nav, settings)
                 }
             }
@@ -271,7 +314,7 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
 
 /** Vuelve a la pantalla principal y cambia a la pestaña indicada. */
 fun NavController.navigateTab(route: String) {
-    HomeTabs.requested.value = HomeTabs.indexOf(route)
+    HomeTabs.requested.value = route
     if (!popBackStack(Routes.HOME, inclusive = false)) navigate(Routes.HOME)
 }
 

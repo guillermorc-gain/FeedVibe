@@ -64,6 +64,16 @@
             android:supportsPictureInPicture="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation" />
 
+        <!-- Radio: suena en segundo plano; Bluetooth, coche y pantalla de bloqueo la controlan. -->
+        <service
+            android:name=".radio.RadioService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+
         <!-- Detecta que se cierra la app del todo (quitarla de recientes). -->
         <service
             android:name=".AppCloseService"
