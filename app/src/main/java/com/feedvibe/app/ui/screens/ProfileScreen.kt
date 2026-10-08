@@ -119,7 +119,6 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
                     SettingsLink(Icons.Filled.Radio, "Radio", "Calidad, grabaciones y descargas") { nav.navigate(Routes.RADIO_SETTINGS) }
                 }
                 SettingsLink(Icons.Filled.Palette, "Apariencia", "Tema, colores y estilo de lista") { nav.navigate(Routes.APPEARANCE) }
-                SettingsLink(Icons.Filled.Tab, "Pestañas", "Ordenar las pestañas de abajo") { nav.navigate(Routes.TABS) }
                 SettingsLink(Icons.Filled.Sync, "Sincronización", "Periodo de actualización y dispositivos") { nav.navigate(Routes.SYNC) }
                 SettingsLink(Icons.Filled.Notifications, "Notificaciones", "Avisos de episodios nuevos y directos") { nav.navigate(Routes.NOTIFICATIONS) }
                 SettingsLink(Icons.Filled.PlayCircle, "Reproducción", "Cómo se abren los vídeos, Shorts…") { nav.navigate(Routes.PLAYBACK) }

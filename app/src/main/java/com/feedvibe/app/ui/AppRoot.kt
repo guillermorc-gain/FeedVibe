@@ -31,6 +31,15 @@ import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.outlined.Radio
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.outlined.AccountCircle
@@ -250,6 +259,22 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
         HomeTabs.requested.value = null
     }
 
+    // Arrastre de pestañas para reordenarlas.
+    var dragIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var itemWidth by remember { mutableFloatStateOf(1f) }
+    val haptic = LocalHapticFeedback.current
+
+    /** Mueve una pestaña visible; las ocultas (Radio fuera del modo radio) conservan su hueco. */
+    fun moveTab(from: Int, to: Int) {
+        val showing = tabs.getOrNull(current)?.route
+        val visible = tabs.toMutableList().apply { add(to, removeAt(from)) }
+        val queue = ArrayDeque(visible)
+        val all = orderedTabs(settings.tabOrder).map { t -> if (t in tabs) queue.removeFirst() else t }
+        HomeTabs.requested.value = showing
+        scope.launch { container.settings.update { it.copy(tabOrder = all.joinToString(",") { t -> t.route }) } }
+    }
+
     /** Tocar el título cambia entre FeedVibe y el modo radio (aparece la pestaña Radio). */
     fun toggleRadio() {
         val on = !settings.radioMode
@@ -278,7 +303,38 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
             NavigationBar {
                 tabs.forEachIndexed { index, tab ->
                     val selected = index == current
+                    val dragging = dragIndex == index
                     NavigationBarItem(
+                        // Mantener pulsada una pestaña y arrastrarla a los lados la cambia de sitio.
+                        modifier = Modifier
+                            .onSizeChanged { itemWidth = it.width.toFloat().coerceAtLeast(1f) }
+                            .zIndex(if (dragging) 1f else 0f)
+                            .graphicsLayer {
+                                translationX = if (dragging) dragOffset else 0f
+                                val sc = if (dragging) 1.12f else 1f
+                                scaleX = sc
+                                scaleY = sc
+                            }
+                            .pointerInput(tabs, index) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = {
+                                        dragIndex = index
+                                        dragOffset = 0f
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    },
+                                    onDrag = { change, amount ->
+                                        change.consume()
+                                        dragOffset += amount.x
+                                    },
+                                    onDragEnd = {
+                                        val target = (index + (dragOffset / itemWidth).roundToInt()).coerceIn(0, tabs.lastIndex)
+                                        dragIndex = null
+                                        dragOffset = 0f
+                                        if (target != index) moveTab(index, target)
+                                    },
+                                    onDragCancel = { dragIndex = null; dragOffset = 0f },
+                                )
+                            },
                         selected = selected,
                         onClick = { goTo(index) },
                         icon = {
