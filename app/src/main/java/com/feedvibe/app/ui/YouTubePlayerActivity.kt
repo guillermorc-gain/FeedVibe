@@ -536,7 +536,7 @@ class YouTubePlayerActivity : ComponentActivity() {
     }
 
     // Pantalla completa pedida desde el propio reproductor.
-    private val chrome = object : WebChromeClient() {
+    private val chrome: WebChromeClient = object : WebChromeClient() {
         override fun onShowCustomView(v: View, cb: CustomViewCallback) {
             fullscreenCallback = cb
             v.setBackgroundColor(Color.BLACK)
