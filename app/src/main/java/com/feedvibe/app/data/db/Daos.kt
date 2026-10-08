@@ -50,7 +50,7 @@ interface SubscriptionDao {
         SELECT sub.*,
             CASE WHEN sub.paused = 1 THEN 0 ELSE
             (SELECT COUNT(*) FROM episodes e LEFT JOIN episode_states s ON s.episodeId = e.id
-                WHERE e.subscriptionId = sub.id AND COALESCE(s.watched, 0) = 0
+                WHERE e.subscriptionId = sub.id AND COALESCE(s.watched, 0) = 0 AND COALESCE(s.watchLater, 0) = 0 AND COALESCE(s.favorite, 0) = 0
                 AND (:hideShorts = 0 OR e.isShort = 0)) END AS unwatchedCount,
             (SELECT COUNT(*) FROM episodes e WHERE e.subscriptionId = sub.id
                 AND (:hideShorts = 0 OR e.isShort = 0)) AS totalCount,
@@ -90,8 +90,11 @@ data class EpisodeSubId(val id: String, val subscriptionId: String)
 
 private const val SHORTS = "(:hideShorts = 0 OR e.isShort = 0)"
 
-/** Novedades y número de «sin ver»: sin los canales en pausa. */
-private const val ACTIVE = "sub.paused = 0"
+/**
+ * Novedades y número de «sin ver»: sin los canales en pausa ni lo que ya has guardado para
+ * más tarde o en favoritos (eso está en la Biblioteca).
+ */
+private const val ACTIVE = "sub.paused = 0 AND COALESCE(s.watchLater, 0) = 0 AND COALESCE(s.favorite, 0) = 0"
 
 @Dao
 interface EpisodeDao {
