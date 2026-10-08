@@ -2,6 +2,7 @@ package com.feedvibe.app.data.sync
 
 import android.util.Log
 import com.feedvibe.app.data.db.AppDatabase
+import com.feedvibe.app.data.db.EpisodeEntity
 import com.feedvibe.app.data.db.EpisodeStateEntity
 import com.feedvibe.app.data.db.SubscriptionEntity
 import com.feedvibe.app.data.prefs.SettingsRepository
@@ -262,6 +263,7 @@ class CloudSync(
             applyRemoteMeta(d, pending)
 
             val s = stateMapOf(d)
+            val meta = d.get("m") as? Map<*, *>
             @Suppress("UNCHECKED_CAST")
             val p = d.get("p") as? Map<String, Any?> ?: emptyMap()
             for ((id, raw) in s) {
@@ -284,6 +286,9 @@ class CloudSync(
                     )
                 } else if (pending != null && localT > t && localT > 1) {
                     pending.states += local!!.copy(subscriptionId = local.subscriptionId ?: d.id)
+                } else if (pending != null && local != null && localT == t && inLibrary(local, false) && meta?.containsKey(id) != true) {
+                    // En la Biblioteca pero subido sin sus datos (versiones anteriores): se completa.
+                    pending.states += local.copy(subscriptionId = local.subscriptionId ?: d.id)
                 }
             }
         }
@@ -293,7 +298,36 @@ class CloudSync(
             localStates.values.filterTo(pending.states) { it.updatedAt > 1 && it.episodeId !in seen && it.subscriptionId != null }
         }
         toApply.chunked(500).forEach { db.states().upsertAll(it) }
+        createLibraryEpisodes(docs)
         settings.setStateCursor(maxServer)
+    }
+
+    /** Episodios de la Biblioteca que llegan de otro dispositivo y aquí no existen: se crean. */
+    private suspend fun createLibraryEpisodes(docs: List<DocumentSnapshot>) {
+        for (d in docs) {
+            @Suppress("UNCHECKED_CAST")
+            val m = d.get("m") as? Map<String, Any?> ?: continue
+            if (m.isEmpty() || db.subscriptions().get(d.id) == null) continue
+            val present = m.keys.toList().chunked(500).flatMap { db.episodes().existingIds(it) }.toHashSet()
+            val missing = m.filterKeys { it !in present }.mapNotNull { (id, raw) ->
+                @Suppress("UNCHECKED_CAST")
+                val e = raw as? Map<String, Any?> ?: return@mapNotNull null
+                EpisodeEntity(
+                    id = id,
+                    subscriptionId = d.id,
+                    title = e["t"] as? String ?: return@mapNotNull null,
+                    url = e["u"] as? String ?: return@mapNotNull null,
+                    mediaUrl = e["mu"] as? String,
+                    mediaType = e["mt"] as? String,
+                    thumbnailUrl = e["i"] as? String,
+                    publishedAt = (e["d"] as? Number)?.toLong() ?: 0,
+                    durationSec = (e["du"] as? Number)?.toLong() ?: 0,
+                    isLive = e["lv"] == true,
+                    isShort = e["sh"] == true,
+                )
+            }
+            if (missing.isNotEmpty()) db.episodes().upsertAll(missing)
+        }
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -357,11 +391,26 @@ class CloudSync(
         (s.updatedAt shl 3) or (if (s.watched) 1L else 0L) or (if (s.watchLater) 2L else 0L) or (if (s.favorite) 4L else 0L)
 
     /** Datos de un canal para escribir con merge: solo se tocan los episodios indicados. */
-    private fun channelData(sub: SubscriptionEntity?, states: List<EpisodeStateEntity>): Map<String, Any?> = buildMap {
+    private fun channelData(
+        sub: SubscriptionEntity?,
+        states: List<EpisodeStateEntity>,
+        episodes: Map<String, EpisodeEntity> = emptyMap(),
+    ): Map<String, Any?> = buildMap {
         if (sub != null) putAll(subMap(sub))
         if (states.isNotEmpty()) {
             put("s", states.associate { it.episodeId to stateCode(it) })
             put("p", states.associate { it.episodeId to (if (it.positionMs > 0) it.positionMs else FieldValue.delete()) })
+            // "m": datos de los episodios de la Biblioteca; al salir de ella se borran.
+            val bulk = isBulk(states)
+            val meta = states.mapNotNull { s ->
+                val e = episodes[s.episodeId]
+                when {
+                    inLibrary(s, bulk) && e != null -> s.episodeId to episodeMeta(e)
+                    !inLibrary(s, bulk) -> s.episodeId to FieldValue.delete()
+                    else -> null
+                }
+            }.toMap()
+            if (meta.isNotEmpty()) put("m", meta)
         }
         put("serverUpdatedAt", FieldValue.serverTimestamp())
     }
@@ -383,15 +432,53 @@ class CloudSync(
      * Una sola escritura por canal, con todos sus episodios cambiados. Las escrituras se
      * encolan offline y Firestore las envía al recuperar conexión.
      */
-    fun pushStates(states: List<EpisodeStateEntity>) = safely {
-        val u = uid ?: return@safely
-        val fs = firestore ?: return@safely
-        val byChannel = states.filter { it.subscriptionId != null }.groupBy { it.subscriptionId!! }
-        byChannel.entries.chunked(400).forEach { chunk ->
-            val batch = fs.batch()
-            chunk.forEach { (subId, list) -> batch.set(channels(u).document(subId), channelData(null, list), SetOptions.merge()) }
-            track(batch.commit())
+    fun pushStates(states: List<EpisodeStateEntity>) {
+        val u = uid ?: return
+        // En orden (un solo hilo): dos cambios seguidos del mismo episodio no se adelantan.
+        scope.launch(pushDispatcher) {
+            runCatching {
+                val fs = firestore ?: return@runCatching
+                val byChannel = states.filter { it.subscriptionId != null }.groupBy { it.subscriptionId!! }
+                val episodes = libraryEpisodes(byChannel)
+                byChannel.entries.chunked(400).forEach { chunk ->
+                    val batch = fs.batch()
+                    chunk.forEach { (subId, list) -> batch.set(channels(u).document(subId), channelData(null, list, episodes), SetOptions.merge()) }
+                    track(batch.commit())
+                }
+            }.onFailure { Log.w(TAG, "pushStates", it) }
         }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val pushDispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(1)
+
+    /**
+     * ¿Está en la Biblioteca? Para esos episodios se envían también sus datos (título, enlace,
+     * imagen…), así aparecen en otro dispositivo aunque no los tenga. Del historial solo lo
+     * reciente y no en marcados masivos (para no llenar el documento del canal).
+     */
+    private fun inLibrary(s: EpisodeStateEntity, bulk: Boolean): Boolean =
+        s.watchLater || s.favorite || (s.positionMs > 0 && !s.watched) ||
+            (s.watched && !bulk && s.watchedAt > System.currentTimeMillis() - 30L * 24 * 3600_000)
+
+    private fun isBulk(list: List<EpisodeStateEntity>) = list.size > 50
+
+    /** Datos de los episodios de la Biblioteca que se van a subir. */
+    private suspend fun libraryEpisodes(byChannel: Map<String, List<EpisodeStateEntity>>): Map<String, EpisodeEntity> {
+        val ids = byChannel.values.flatMap { list -> list.filter { inLibrary(it, isBulk(list)) }.map { it.episodeId } }
+        return ids.chunked(500).flatMap { db.episodes().getMany(it) }.associateBy { it.id }
+    }
+
+    private fun episodeMeta(e: EpisodeEntity): Map<String, Any> = buildMap {
+        put("t", e.title)
+        put("u", e.url)
+        put("d", e.publishedAt)
+        e.thumbnailUrl?.let { put("i", it) }
+        e.mediaUrl?.let { put("mu", it) }
+        e.mediaType?.let { put("mt", it) }
+        if (e.durationSec > 0) put("du", e.durationSec)
+        if (e.isShort) put("sh", true)
+        if (e.isLive) put("lv", true)
     }
 
     /** Mientras se vacía la cola antigua no hay cliente de Firestore: se ignora el error. */
@@ -425,11 +512,12 @@ class CloudSync(
         db.subscriptions().getAll().filter { it.id !in remoteIds }.forEach { pending.subs[it.id] = it }
 
         val statesByChannel = pending.states.groupBy { it.subscriptionId!! }
+        val episodes = libraryEpisodes(statesByChannel)
         val channelIds = pending.subs.keys + statesByChannel.keys
         channelIds.chunked(400).forEach { chunk ->
             val batch = fs.batch()
             chunk.forEach { id ->
-                batch.set(channels(u).document(id), channelData(pending.subs[id], statesByChannel[id].orEmpty()), SetOptions.merge())
+                batch.set(channels(u).document(id), channelData(pending.subs[id], statesByChannel[id].orEmpty(), episodes), SetOptions.merge())
             }
             // Si Firebase tarda (p. ej. límite diario agotado) la escritura queda en cola y se
             // envía sola más tarde: no se repite para no duplicarla.

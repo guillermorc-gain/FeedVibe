@@ -163,6 +163,9 @@ interface EpisodeDao {
     @Query("SELECT id FROM episodes WHERE id IN (:ids)")
     suspend fun existingIds(ids: List<String>): List<String>
 
+    @Query("SELECT * FROM episodes WHERE id IN (:ids)")
+    suspend fun getMany(ids: List<String>): List<EpisodeEntity>
+
     /**
      * Borra los episodios vistos que no están en la Biblioteca (ni favoritos, ni para más tarde,
      * ni entre los [keepHistory] últimos del historial). Su estado se conserva: así no vuelven a

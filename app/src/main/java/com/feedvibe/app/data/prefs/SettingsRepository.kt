@@ -139,8 +139,8 @@ class SettingsRepository(private val context: Context) {
         val lastBackup = longPreferencesKey("last_backup")
         val lastUpdateCheck = longPreferencesKey("last_update_check")
         val stateCursor = longPreferencesKey("channel_cursor")
-        // v3: la sincronización pasó a un documento por canal; se repite la primera sincronización.
-        val syncedUid = stringPreferencesKey("synced_uid_v3")
+        // v4: se añaden los datos de los episodios de la Biblioteca; se repite la primera sincronización.
+        val syncedUid = stringPreferencesKey("synced_uid_v4")
         val firestoreQueueDropped = booleanPreferencesKey("firestore_queue_dropped")
         val accessCache = stringPreferencesKey("access_cache")
         val appClosed = booleanPreferencesKey("app_closed")
