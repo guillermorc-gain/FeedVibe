@@ -242,10 +242,23 @@ class YouTubePlayerActivity : ComponentActivity() {
     private fun playNext() {
         val current = episodeId
         lifecycleScope.launch {
-            val candidates = queue.ifEmpty {
-                container.feeds.feedEpisodes.first().filter { youtubeVideoId(it) != null }.map { it.episode.id }
+            val after = if (queue.isNotEmpty()) {
+                queue.indexOf(current).let { if (it >= 0) queue.drop(it + 1) else queue }
+            } else {
+                // Sin lista: se sigue por Novedades. El vídeo que acaba de terminar ya está visto y
+                // puede haber desaparecido de la lista; entonces se busca su sitio por la fecha
+                // (antes empezaba otra vez por el primero de la lista).
+                val list = container.feeds.feedEpisodes.first().filter { youtubeVideoId(it) != null }
+                val index = list.indexOfFirst { it.episode.id == current }
+                if (index >= 0) {
+                    list.drop(index + 1)
+                } else {
+                    val published = container.feeds.getEpisode(current)?.episode?.publishedAt
+                    val oldestFirst = container.settings.current().feedOldestFirst
+                    if (published == null) list
+                    else list.filter { if (oldestFirst) it.episode.publishedAt > published else it.episode.publishedAt < published }
+                }.map { it.episode.id }
             }
-            val after = candidates.indexOf(current).let { if (it >= 0) candidates.drop(it + 1) else candidates }
             val next = after.firstOrNull { id ->
                 id != current && container.feeds.getEpisode(id)?.let { !it.watched && youtubeVideoId(it) != null } == true
             }
