@@ -27,13 +27,16 @@ enum class SyncStatus { OFF, CONNECTING, SYNCED, ERROR }
 /**
  * Sincronización en tiempo real entre dispositivos con Cloud Firestore.
  *
- * users/{uid}                       -> perfil (apodo, foto)
- * users/{uid}/subscriptions/{subId} -> suscripciones (con borrado lógico "deleted")
- * users/{uid}/states/{episodeId}    -> visto / ver más tarde / favorito / posición
+ * users/{uid}                  -> perfil (apodo, foto)
+ * users/{uid}/channels/{subId} -> un documento por canal: la suscripción (con borrado
+ *                                 lógico "deleted") y, en "s", el estado de los episodios
+ *                                 marcados a mano (visto / ver más tarde / favorito y la hora
+ *                                 del cambio, en un número); en "p", la posición de reproducción.
  *
- * Cada documento lleva "updatedAt" (hora del dispositivo, para resolver conflictos: gana
- * el cambio más reciente) y "serverUpdatedAt" (hora del servidor, para descargar solo lo
- * que ha cambiado desde la última vez).
+ * Así la primera sincronización cuesta una lectura y una escritura por canal en vez de una
+ * por episodio. Los vistos automáticos del historial no se suben: cada dispositivo los calcula.
+ * "updatedAt" (hora del dispositivo) resuelve conflictos: gana el cambio más reciente;
+ * "serverUpdatedAt" (hora del servidor) sirve para descargar solo lo que ha cambiado.
  */
 class CloudSync(
     private val db: AppDatabase,
@@ -89,7 +92,12 @@ class CloudSync(
                 }
                 settings.setSyncedUid(newUid)
             }
-            synchronized(this@CloudSync) { if (uid == newUid) ready = true }
+            synchronized(this@CloudSync) {
+                if (uid == newUid) {
+                    ready = true
+                    _status.value = SyncStatus.SYNCED
+                }
+            }
             updateListeners()
         }
     }
@@ -128,25 +136,23 @@ class CloudSync(
         settings.setStateCursor(0)
     }
 
+    private fun channels(u: String) = userDoc(u).collection("channels")
+
+    private fun sinceCursor(cursor: Long) = Timestamp(Date((cursor - 10 * 60_000).coerceAtLeast(0)))
+
     private fun attachListeners(u: String, cursor: Long) {
         if (firestore == null) return
-        listeners += userDoc(u).collection("subscriptions").addSnapshotListener { snap, err ->
-            if (err != null) { _status.value = SyncStatus.ERROR; Log.w(TAG, "subs", err); return@addSnapshotListener }
-            val docs = snap?.documentChanges?.filter { it.type != DocumentChange.Type.REMOVED }?.map { it.document } ?: return@addSnapshotListener
-            scope.launch { applyRemoteSubscriptions(docs) }
-            _status.value = SyncStatus.SYNCED
-        }
-        // Margen de 10 minutos por si los relojes no van exactamente igual.
-        val since = Timestamp(Date((cursor - 10 * 60_000).coerceAtLeast(0)))
-        listeners += userDoc(u).collection("states")
-            .whereGreaterThan("serverUpdatedAt", since)
+        // Solo los canales que han cambiado desde la última vez (margen de 10 minutos por
+        // si los relojes no van exactamente igual).
+        listeners += channels(u)
+            .whereGreaterThan("serverUpdatedAt", sinceCursor(cursor))
             .addSnapshotListener { snap, err ->
-                if (err != null) { _status.value = SyncStatus.ERROR; Log.w(TAG, "states", err); return@addSnapshotListener }
+                if (err != null) { _status.value = SyncStatus.ERROR; Log.w(TAG, "channels", err); return@addSnapshotListener }
                 // Los cambios propios aún sin confirmar (hasPendingWrites) ya están aplicados aquí.
                 val docs = snap?.documentChanges
                     ?.filter { it.type != DocumentChange.Type.REMOVED && !it.document.metadata.hasPendingWrites() }
                     ?.map { it.document } ?: return@addSnapshotListener
-                if (docs.isNotEmpty()) scope.launch { applyRemoteStates(docs) }
+                if (docs.isNotEmpty()) scope.launch { runCatching { applyRemoteChannels(docs) }.onFailure { Log.w(TAG, "apply", it) } }
                 _status.value = SyncStatus.SYNCED
             }
         listeners += userDoc(u).addSnapshotListener { snap, _ ->
@@ -164,67 +170,107 @@ class CloudSync(
         val u = uid ?: settings.syncedUid() ?: return
         if (firestore == null) return
         runCatching {
-            val subs = userDoc(u).collection("subscriptions").get().await()
-            applyRemoteSubscriptions(subs.documents)
-            val since = Timestamp(Date((settings.stateCursor() - 10 * 60_000).coerceAtLeast(0)))
-            val states = userDoc(u).collection("states").whereGreaterThan("serverUpdatedAt", since).get().await()
-            applyRemoteStates(states.documents)
+            val docs = channels(u).whereGreaterThan("serverUpdatedAt", sinceCursor(settings.stateCursor())).get().await()
+            applyRemoteChannels(docs.documents)
         }.onFailure { Log.w(TAG, "pullOnce", it) }
     }
 
-    private suspend fun applyRemoteSubscriptions(docs: List<DocumentSnapshot>) {
-        for (d in docs) {
-            val remoteUpdated = d.getLong("updatedAt") ?: 0
-            val local = db.subscriptions().get(d.id)
-            if (local != null && local.updatedAt >= remoteUpdated) continue
-            if (d.getBoolean("deleted") == true) {
-                if (local != null) {
-                    db.episodes().deleteForSubscription(d.id)
-                    db.subscriptions().delete(d.id)
-                }
-                continue
-            }
-            val sub = SubscriptionEntity(
-                id = d.id,
-                type = SourceType.fromName(d.getString("type") ?: "RSS"),
-                sourceKey = d.getString("sourceKey") ?: continue,
-                title = d.getString("title") ?: "",
-                description = local?.description ?: "",
-                imageUrl = d.getString("imageUrl"),
-                siteUrl = d.getString("siteUrl"),
-                category = d.getString("category"),
-                notify = d.getBoolean("notify") ?: true,
-                fullHistory = d.getBoolean("fullHistory") ?: false,
-                paused = d.getBoolean("paused") ?: false,
-                addedAt = d.getLong("addedAt") ?: System.currentTimeMillis(),
-                lastRefreshed = local?.lastRefreshed ?: 0,
-                lastError = local?.lastError,
-                updatedAt = remoteUpdated,
-            )
-            db.subscriptions().upsert(sub)
-            if (local == null) onRemoteSubscriptionAdded?.invoke(sub)
-            if (sub.fullHistory && local?.fullHistory != true) onRemoteFullHistory?.invoke(sub)
-        }
+    /** Lo que hay en este dispositivo y falta (o es más antiguo) en la nube. */
+    private class Pending {
+        val subs = mutableMapOf<String, SubscriptionEntity>()
+        val states = mutableListOf<EpisodeStateEntity>()
     }
 
-    private suspend fun applyRemoteStates(docs: List<DocumentSnapshot>) {
+    /**
+     * Aplica los documentos de canal que vienen de la nube. Gana siempre el cambio más
+     * reciente de cada canal y de cada episodio. Con [pending] se apunta además lo local que
+     * es más nuevo que lo remoto, para subirlo (solo en la primera sincronización).
+     */
+    private suspend fun applyRemoteChannels(docs: List<DocumentSnapshot>, pending: Pending? = null) {
         if (docs.isEmpty()) return
         var maxServer = settings.stateCursor()
-        val states = docs.map { d ->
+        // Primera sincronización: hacen falta todos los estados locales para saber qué subir;
+        // después basta con los de los episodios que llegan.
+        val localStates = if (pending != null) db.states().getAll().associateBy { it.episodeId }
+        else docs.flatMap { stateMapOf(it).keys }.chunked(500).flatMap { db.states().getMany(it) }.associateBy { it.episodeId }
+        val toApply = mutableListOf<EpisodeStateEntity>()
+        val seen = HashSet<String>()
+        for (d in docs) {
             d.getTimestamp("serverUpdatedAt")?.toDate()?.time?.let { if (it > maxServer) maxServer = it }
-            EpisodeStateEntity(
-                episodeId = d.id,
-                subscriptionId = d.getString("subscriptionId"),
-                watched = d.getBoolean("watched") ?: false,
-                watchLater = d.getBoolean("watchLater") ?: false,
-                favorite = d.getBoolean("favorite") ?: false,
-                positionMs = d.getLong("positionMs") ?: 0,
-                watchedAt = d.getLong("watchedAt") ?: 0,
-                updatedAt = d.getLong("updatedAt") ?: 0,
-            )
+            applyRemoteMeta(d, pending)
+
+            val s = stateMapOf(d)
+            @Suppress("UNCHECKED_CAST")
+            val p = d.get("p") as? Map<String, Any?> ?: emptyMap()
+            for ((id, raw) in s) {
+                val code = (raw as? Number)?.toLong() ?: continue
+                seen += id
+                val t = code shr 3
+                val local = localStates[id]
+                val localT = local?.updatedAt ?: -1
+                if (localT < t) {
+                    val watched = (code and 1L) != 0L
+                    toApply += EpisodeStateEntity(
+                        episodeId = id,
+                        subscriptionId = local?.subscriptionId ?: d.id,
+                        watched = watched,
+                        watchLater = (code and 2L) != 0L,
+                        favorite = (code and 4L) != 0L,
+                        positionMs = (p[id] as? Number)?.toLong() ?: 0,
+                        watchedAt = if (watched) local?.watchedAt?.takeIf { it > 0 } ?: t else 0,
+                        updatedAt = t,
+                    )
+                } else if (pending != null && localT > t && localT > 1) {
+                    pending.states += local!!.copy(subscriptionId = local.subscriptionId ?: d.id)
+                }
+            }
         }
-        db.states().upsertIfNewer(states)
+        if (pending != null) {
+            // Cambios hechos a mano en este dispositivo que la nube aún no conoce. Los vistos
+            // automáticos del historial (updatedAt <= 1) no se suben: cada dispositivo los calcula.
+            localStates.values.filterTo(pending.states) { it.updatedAt > 1 && it.episodeId !in seen && it.subscriptionId != null }
+        }
+        toApply.chunked(500).forEach { db.states().upsertAll(it) }
         settings.setStateCursor(maxServer)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun stateMapOf(d: DocumentSnapshot): Map<String, Any?> = d.get("s") as? Map<String, Any?> ?: emptyMap()
+
+    private suspend fun applyRemoteMeta(d: DocumentSnapshot, pending: Pending?) {
+        val remoteUpdated = d.getLong("updatedAt") ?: -1
+        val local = db.subscriptions().get(d.id)
+        if (local != null && local.updatedAt >= remoteUpdated) {
+            if (pending != null && local.updatedAt > remoteUpdated) pending.subs[local.id] = local
+            return
+        }
+        if (d.getBoolean("deleted") == true) {
+            if (local != null) {
+                db.episodes().deleteForSubscription(d.id)
+                db.subscriptions().delete(d.id)
+            }
+            return
+        }
+        val sub = SubscriptionEntity(
+            id = d.id,
+            type = SourceType.fromName(d.getString("type") ?: "RSS"),
+            sourceKey = d.getString("sourceKey") ?: return,
+            title = d.getString("title") ?: "",
+            description = local?.description ?: "",
+            imageUrl = d.getString("imageUrl"),
+            siteUrl = d.getString("siteUrl"),
+            category = d.getString("category"),
+            notify = d.getBoolean("notify") ?: true,
+            fullHistory = d.getBoolean("fullHistory") ?: false,
+            paused = d.getBoolean("paused") ?: false,
+            addedAt = d.getLong("addedAt") ?: System.currentTimeMillis(),
+            lastRefreshed = local?.lastRefreshed ?: 0,
+            lastError = local?.lastError,
+            updatedAt = remoteUpdated,
+        )
+        db.subscriptions().upsert(sub)
+        if (local == null) onRemoteSubscriptionAdded?.invoke(sub)
+        if (sub.fullHistory && local?.fullHistory != true) onRemoteFullHistory?.invoke(sub)
     }
 
     // ------------------ Subida de cambios locales ------------------
@@ -242,40 +288,46 @@ class CloudSync(
         "addedAt" to s.addedAt,
         "updatedAt" to s.updatedAt,
         "deleted" to false,
-        "serverUpdatedAt" to FieldValue.serverTimestamp(),
     )
 
-    private fun stateMap(s: EpisodeStateEntity): Map<String, Any?> = mapOf(
-        "subscriptionId" to s.subscriptionId,
-        "watched" to s.watched,
-        "watchLater" to s.watchLater,
-        "favorite" to s.favorite,
-        "positionMs" to s.positionMs,
-        "watchedAt" to s.watchedAt,
-        "updatedAt" to s.updatedAt,
-        "serverUpdatedAt" to FieldValue.serverTimestamp(),
-    )
+    /** Estado de un episodio en un solo número: hora del cambio y visto / ver más tarde / favorito. */
+    private fun stateCode(s: EpisodeStateEntity): Long =
+        (s.updatedAt shl 3) or (if (s.watched) 1L else 0L) or (if (s.watchLater) 2L else 0L) or (if (s.favorite) 4L else 0L)
+
+    /** Datos de un canal para escribir con merge: solo se tocan los episodios indicados. */
+    private fun channelData(sub: SubscriptionEntity?, states: List<EpisodeStateEntity>): Map<String, Any?> = buildMap {
+        if (sub != null) putAll(subMap(sub))
+        if (states.isNotEmpty()) {
+            put("s", states.associate { it.episodeId to stateCode(it) })
+            put("p", states.associate { it.episodeId to (if (it.positionMs > 0) it.positionMs else FieldValue.delete()) })
+        }
+        put("serverUpdatedAt", FieldValue.serverTimestamp())
+    }
 
     fun pushSubscription(s: SubscriptionEntity) {
         val u = uid ?: return
-        userDoc(u).collection("subscriptions").document(s.id).set(subMap(s))
+        channels(u).document(s.id).set(channelData(s, emptyList()), SetOptions.merge())
     }
 
     fun pushSubscriptionDeleted(id: String, at: Long) {
         val u = uid ?: return
-        userDoc(u).collection("subscriptions").document(id).set(
+        channels(u).document(id).set(
             mapOf("deleted" to true, "updatedAt" to at, "serverUpdatedAt" to FieldValue.serverTimestamp()),
             SetOptions.merge(),
         )
     }
 
-    /** Las escrituras se encolan offline y Firestore las envía al recuperar conexión. */
+    /**
+     * Una sola escritura por canal, con todos sus episodios cambiados. Las escrituras se
+     * encolan offline y Firestore las envía al recuperar conexión.
+     */
     fun pushStates(states: List<EpisodeStateEntity>) {
         val u = uid ?: return
         val fs = firestore ?: return
-        states.chunked(400).forEach { chunk ->
+        val byChannel = states.filter { it.subscriptionId != null }.groupBy { it.subscriptionId!! }
+        byChannel.entries.chunked(400).forEach { chunk ->
             val batch = fs.batch()
-            chunk.forEach { batch.set(userDoc(u).collection("states").document(it.episodeId), stateMap(it)) }
+            chunk.forEach { (subId, list) -> batch.set(channels(u).document(subId), channelData(null, list), SetOptions.merge()) }
             batch.commit()
         }
     }
@@ -293,29 +345,24 @@ class CloudSync(
     }
 
     /**
-     * Primera sincronización en este dispositivo: se combinan datos locales y remotos.
-     * Gana siempre el cambio más reciente de cada elemento.
+     * Primera sincronización en este dispositivo: se combinan datos locales y remotos con
+     * una lectura y, como mucho, una escritura por canal. Gana siempre el cambio más reciente.
      */
     private suspend fun uploadAll(u: String) {
         val fs = firestore ?: return
-        val remoteSubs = userDoc(u).collection("subscriptions").get().await().documents
-        val remoteSubTimes = remoteSubs.associate { it.id to (it.getLong("updatedAt") ?: -1) }
-        val localSubs = db.subscriptions().getAll().filter { s -> (remoteSubTimes[s.id] ?: -1) < s.updatedAt }
-        applyRemoteSubscriptions(remoteSubs)
-        localSubs.chunked(400).forEach { chunk ->
-            val batch = fs.batch()
-            chunk.forEach { batch.set(userDoc(u).collection("subscriptions").document(it.id), subMap(it)) }
-            batch.commit().await()
-        }
+        val remote = channels(u).get().await().documents
+        val remoteIds = remote.mapTo(HashSet()) { it.id }
+        val pending = Pending()
+        applyRemoteChannels(remote, pending)
+        db.subscriptions().getAll().filter { it.id !in remoteIds }.forEach { pending.subs[it.id] = it }
 
-        val remoteStates = userDoc(u).collection("states").get().await().documents
-        val remoteStateTimes = remoteStates.associate { it.id to (it.getLong("updatedAt") ?: -1) }
-        // Los vistos automáticos del historial (updatedAt <= 1) no se suben.
-        val localStates = db.states().getAll().filter { s -> s.updatedAt > 1 && (remoteStateTimes[s.episodeId] ?: -1) < s.updatedAt }
-        applyRemoteStates(remoteStates)
-        localStates.chunked(400).forEach { chunk ->
+        val statesByChannel = pending.states.groupBy { it.subscriptionId!! }
+        val channelIds = pending.subs.keys + statesByChannel.keys
+        channelIds.chunked(400).forEach { chunk ->
             val batch = fs.batch()
-            chunk.forEach { batch.set(userDoc(u).collection("states").document(it.episodeId), stateMap(it)) }
+            chunk.forEach { id ->
+                batch.set(channels(u).document(id), channelData(pending.subs[id], statesByChannel[id].orEmpty()), SetOptions.merge())
+            }
             batch.commit().await()
         }
     }
