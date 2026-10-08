@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.NewReleases
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -56,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
@@ -76,7 +76,6 @@ import com.feedvibe.app.ui.components.looksLikeChannelAddress
 import com.feedvibe.app.ui.components.rememberSelectionState
 import com.feedvibe.app.ui.components.EpisodeRow
 import com.feedvibe.app.ui.components.ScreenScaffold
-import com.feedvibe.app.ui.relativeTime
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,8 +88,6 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
     val all by feeds.feedEpisodes.collectAsStateWithLifecycle(emptyList())
     val subs by feeds.subscriptionsWithCounts.collectAsStateWithLifecycle(emptyList())
     val categories by feeds.categories.collectAsStateWithLifecycle(emptyList())
-    val refreshing by feeds.refreshing.collectAsStateWithLifecycle()
-    val lastRefresh by container.settings.lastRefresh.collectAsStateWithLifecycle(0L)
 
     var typeFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var categoryFilter by rememberSaveable { mutableStateOf<String?>(null) }
@@ -116,8 +113,12 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
     selection.order = visible.map { it.episode.id }
     val isAddress = looksLikeChannelAddress(query)
 
+    // El indicador de «actualizando» solo sale al tirar de la lista hacia abajo (no en las
+    // actualizaciones automáticas, que pueden tardar y lo dejaban fijo arriba).
+    var pulling by remember { mutableStateOf(false) }
     fun refresh() = scope.launch {
-        val r = feeds.refreshAll()
+        pulling = true
+        val r = try { feeds.refreshAll() } finally { pulling = false }
         val n = r.newEpisodes.sumOf { it.episodes.size }
         val msg = buildString {
             append(if (n == 0) "No hay episodios nuevos" else "$n episodios nuevos")
@@ -139,6 +140,58 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
             scope.launch { snackbar.showSnackbar("No hay vídeos de YouTube sin ver en la lista") }
         } else {
             context.startActivity(YouTubePlayerActivity.intent(context, ids.first(), ids))
+        }
+    }
+
+    @Composable
+    fun FeedActions() {
+        IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
+            Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, "Buscar")
+        }
+        // Reproducción automática: al terminar un vídeo pasa solo al siguiente sin ver.
+        IconButton(onClick = {
+            val on = !settings.autoplayNext
+            scope.launch {
+                container.settings.update { it.copy(autoplayNext = on) }
+                snackbar.currentSnackbarData?.dismiss()
+                snackbar.showSnackbar(if (on) "Reproducción automática activada: al terminar un vídeo empieza el siguiente" else "Reproducción automática desactivada")
+            }
+        }) {
+            Icon(
+                if (settings.autoplayNext) Icons.AutoMirrored.Filled.PlaylistPlay else Icons.AutoMirrored.Outlined.PlaylistPlayOutlined,
+                if (settings.autoplayNext) "Desactivar reproducción automática" else "Activar reproducción automática",
+                tint = if (settings.autoplayNext) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+            )
+        }
+        Box {
+            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Más") }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text(if (settings.hideWatched) "Mostrar vistos" else "Ocultar vistos") },
+                    leadingIcon = { Icon(if (settings.hideWatched) Icons.Filled.Visibility else Icons.Filled.VisibilityOff, null) },
+                    onClick = {
+                        menu = false
+                        scope.launch { container.settings.update { it.copy(hideWatched = !it.hideWatched) } }
+                    },
+                )
+                listOf(false to "Más recientes primero", true to "Más antiguos primero").forEach { (oldest, label) ->
+                    DropdownMenuItem(
+                        text = { Text(label, fontWeight = if (settings.feedOldestFirst == oldest) FontWeight.Bold else FontWeight.Normal) },
+                        leadingIcon = {
+                            RadioButton(selected = settings.feedOldestFirst == oldest, onClick = null)
+                        },
+                        onClick = {
+                            menu = false
+                            scope.launch { container.settings.update { it.copy(feedOldestFirst = oldest) } }
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text("Marcar lista como vista") },
+                    leadingIcon = { Icon(Icons.Filled.DoneAll, null) },
+                    onClick = { menu = false; confirmMarkAll = true },
+                )
+            }
         }
     }
 
@@ -168,57 +221,6 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                 )
             }
         } else null,
-        actions = {
-            IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
-                Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, "Buscar")
-            }
-            // Reproducción automática: al terminar un vídeo pasa solo al siguiente sin ver.
-            IconButton(onClick = {
-                val on = !settings.autoplayNext
-                scope.launch {
-                    container.settings.update { it.copy(autoplayNext = on) }
-                    snackbar.currentSnackbarData?.dismiss()
-                    snackbar.showSnackbar(if (on) "Reproducción automática activada: al terminar un vídeo empieza el siguiente" else "Reproducción automática desactivada")
-                }
-            }) {
-                Icon(
-                    if (settings.autoplayNext) Icons.AutoMirrored.Filled.PlaylistPlay else Icons.AutoMirrored.Outlined.PlaylistPlayOutlined,
-                    if (settings.autoplayNext) "Desactivar reproducción automática" else "Activar reproducción automática",
-                    tint = if (settings.autoplayNext) MaterialTheme.colorScheme.primary else LocalContentColor.current,
-                )
-            }
-            IconButton(onClick = { refresh() }, enabled = !refreshing) { Icon(Icons.Filled.Refresh, "Actualizar") }
-            Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Más") }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text(if (settings.hideWatched) "Mostrar vistos" else "Ocultar vistos") },
-                        leadingIcon = { Icon(if (settings.hideWatched) Icons.Filled.Visibility else Icons.Filled.VisibilityOff, null) },
-                        onClick = {
-                            menu = false
-                            scope.launch { container.settings.update { it.copy(hideWatched = !it.hideWatched) } }
-                        },
-                    )
-                    listOf(false to "Más recientes primero", true to "Más antiguos primero").forEach { (oldest, label) ->
-                        DropdownMenuItem(
-                            text = { Text(label, fontWeight = if (settings.feedOldestFirst == oldest) FontWeight.Bold else FontWeight.Normal) },
-                            leadingIcon = {
-                                RadioButton(selected = settings.feedOldestFirst == oldest, onClick = null)
-                            },
-                            onClick = {
-                                menu = false
-                                scope.launch { container.settings.update { it.copy(feedOldestFirst = oldest) } }
-                            },
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text("Marcar lista como vista") },
-                        leadingIcon = { Icon(Icons.Filled.DoneAll, null) },
-                        onClick = { menu = false; confirmMarkAll = true },
-                    )
-                }
-            }
-        },
         floatingActionButton = {
             if (!selection.active) ExtendedFloatingActionButton(
                 onClick = { playNext() },
@@ -228,7 +230,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
         },
     ) { padding ->
         PullToRefreshBox(
-            isRefreshing = refreshing,
+            isRefreshing = pulling,
             onRefresh = { refresh() },
             modifier = Modifier.fillMaxSize().padding(padding),
         ) {
@@ -250,12 +252,19 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                     }
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    Text(
-                        "Novedades",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(start = 16.dp, top = 4.dp),
-                    )
+                    // Los botones van en esta línea para dejar despejado el nombre de la app.
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "Novedades",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        FeedActions()
+                    }
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Row(
@@ -282,17 +291,6 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                             )
                         }
                     }
-                }
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    Text(
-                        buildString {
-                            append("${visible.count { !it.watched }} sin ver")
-                            if (lastRefresh > 0) append(" · actualizado ${relativeTime(lastRefresh)}")
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    )
                 }
                 if (visible.isEmpty() && !isAddress) {
                     item(span = { GridItemSpan(maxLineSpan) }) {

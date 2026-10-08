@@ -77,7 +77,7 @@ import com.feedvibe.app.data.prefs.AppSettings
 import com.feedvibe.app.data.sync.SyncStatus
 import com.feedvibe.app.ui.LocalContainer
 import com.feedvibe.app.ui.Routes
-import com.feedvibe.app.ui.navigateTab
+import com.feedvibe.app.data.access.isAdmin
 import com.feedvibe.app.ui.components.UserAvatar
 import kotlinx.coroutines.launch
 import java.io.File
@@ -91,9 +91,6 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
     val snackbar = remember { SnackbarHostState() }
     val user by container.auth.user.collectAsStateWithLifecycle()
     val localPhoto by container.profile.photo.collectAsStateWithLifecycle(null)
-    val subs by container.feeds.subscriptionsWithCounts.collectAsStateWithLifecycle(emptyList())
-    val unwatched by container.feeds.unwatchedCount.collectAsStateWithLifecycle(0)
-    val watched by container.feeds.watchedCount.collectAsStateWithLifecycle(0)
     val syncStatus by container.cloud.status.collectAsStateWithLifecycle()
     val syncDetail by container.cloud.detail.collectAsStateWithLifecycle()
 
@@ -123,120 +120,117 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            // ---------- Cabecera con degradado y avatar editable ----------
-            Box(
+            // ---------- Cabecera (discreta): foto y nombre ----------
+            Row(
                 Modifier
                     .fillMaxWidth()
                     .background(
-                        Brush.verticalGradient(
+                        Brush.horizontalGradient(
                             listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary.copy(alpha = 0.75f))
                         )
                     )
                     .statusBarsPadding()
-                    .padding(top = 24.dp, bottom = 28.dp),
-                contentAlignment = Alignment.Center,
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(Modifier.clickable { photoSheet = true }) {
-                        UserAvatar(photo, 112.dp, Modifier.border(4.dp, Color.White, CircleShape))
-                        Box(
-                            Modifier
-                                .align(Alignment.BottomEnd)
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                                .padding(6.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Filled.PhotoCamera, "Cambiar foto", tint = MaterialTheme.colorScheme.primary)
-                        }
+                Box(Modifier.clickable { photoSheet = true }) {
+                    UserAvatar(photo, 64.dp, Modifier.border(3.dp, Color.White, CircleShape))
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .padding(4.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.PhotoCamera, "Cambiar foto", tint = MaterialTheme.colorScheme.primary)
                     }
-                    Spacer(Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { editName = true }) {
-                        Text(displayName, style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.width(6.dp))
-                        Icon(Icons.Filled.Edit, "Editar nombre", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
-                    }
-                    user?.let {
-                        Text(it.email, color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium)
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            when (syncStatus) {
-                                SyncStatus.SYNCED -> "● Sincronizado"
-                                SyncStatus.CONNECTING -> "● Conectando…"
-                                SyncStatus.ERROR -> "● Error de sincronización"
-                                SyncStatus.OFF -> "● Sin sincronizar"
-                            },
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                        syncDetail?.let {
-                            Text(
-                                it,
-                                color = Color.White.copy(alpha = 0.85f),
-                                style = MaterialTheme.typography.bodySmall,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 24.dp),
-                            )
-                        }
-                    }
-                    if (user == null) {
-                        Spacer(Modifier.height(12.dp))
-                        Button(
-                            onClick = {
-                                val activity = context as? Activity ?: return@Button
-                                signingIn = true
-                                scope.launch {
-                                    container.auth.signIn(activity)
-                                        .onSuccess { snackbar.showSnackbar("¡Hola, ${it.name}! Tus datos se sincronizarán.") }
-                                        .onFailure { snackbar.showSnackbar(it.message ?: "No se pudo iniciar sesión") }
-                                    signingIn = false
-                                }
-                            },
-                            enabled = !signingIn,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = MaterialTheme.colorScheme.primary),
-                        ) {
-                            Icon(Icons.Filled.AccountCircle, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Iniciar sesión con Google")
-                        }
-                        Text(
-                            "Sincroniza lo que has visto entre tus dispositivos",
-                            color = Color.White.copy(alpha = 0.85f),
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
-                    }
+                }
+                Spacer(Modifier.width(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).clickable { editName = true }) {
+                    Text(displayName, style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f, fill = false))
+                    Spacer(Modifier.width(6.dp))
+                    Icon(Icons.Filled.Edit, "Editar nombre", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
                 }
             }
 
-            // ---------- Estadísticas ----------
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                StatCard("Canales", subs.size.toString(), Modifier.weight(1f)) { nav.navigateTab(Routes.CHANNELS) }
-                StatCard("Sin ver", unwatched.toString(), Modifier.weight(1f)) { nav.navigateTab(Routes.FEED) }
-                StatCard("Vistos", watched.toString(), Modifier.weight(1f)) { nav.navigateTab(Routes.LIBRARY) }
-            }
-
-            // ---------- Ajustes ----------
+            // ---------- Ajustes (de este dispositivo; no se sincronizan) ----------
             SectionTitle("Ajustes")
             SettingsGroup {
                 SettingsLink(Icons.Filled.Palette, "Apariencia", "Tema, colores y estilo de lista") { nav.navigate(Routes.APPEARANCE) }
                 SettingsLink(Icons.Filled.Sync, "Sincronización", "Periodo de actualización y dispositivos") { nav.navigate(Routes.SYNC) }
                 SettingsLink(Icons.Filled.Notifications, "Notificaciones", "Avisos de episodios nuevos y directos") { nav.navigate(Routes.NOTIFICATIONS) }
                 SettingsLink(Icons.Filled.PlayCircle, "Reproducción", "Cómo se abren los vídeos, Shorts…") { nav.navigate(Routes.PLAYBACK) }
-                SettingsLink(Icons.Filled.Backup, "Copias de seguridad", "Google Drive, archivo local y OPML") { nav.navigate(Routes.BACKUP) }
+                SettingsLink(Icons.Filled.Backup, "Copias de seguridad", "Archivo en el teléfono y OPML") { nav.navigate(Routes.BACKUP) }
                 SettingsLink(Icons.Filled.SystemUpdate, "Actualizaciones", "Versión ${container.updater.currentVersion}") { nav.navigate(Routes.ABOUT) }
-                SettingsLink(Icons.Filled.Info, "Acerca de FeedVibe", null) { nav.navigate(Routes.ABOUT) }
             }
-            if (user != null) {
-                SettingsGroup {
+
+            // ---------- Administración (solo la cuenta del administrador) ----------
+            if (isAdmin(user)) AdminSections(snackbar)
+
+            // ---------- Perfil: cuenta de Google y cerrar sesión ----------
+            SectionTitle("Perfil")
+            SettingsGroup {
+                val u = user
+                if (u != null) {
+                    ListItem(
+                        headlineContent = { Text(u.name.ifBlank { u.email }) },
+                        supportingContent = {
+                            Column {
+                                Text(u.email)
+                                Text(
+                                    when (syncStatus) {
+                                        SyncStatus.SYNCED -> "● Sincronizado"
+                                        SyncStatus.CONNECTING -> "● Conectando…"
+                                        SyncStatus.ERROR -> "● Error de sincronización"
+                                        SyncStatus.OFF -> "● Sin sincronizar"
+                                    },
+                                    color = when (syncStatus) {
+                                        SyncStatus.SYNCED -> MaterialTheme.colorScheme.primary
+                                        SyncStatus.ERROR -> MaterialTheme.colorScheme.error
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                syncDetail?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                            }
+                        },
+                        leadingContent = { UserAvatar(u.photoUrl, 40.dp) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
                     SettingsLink(Icons.AutoMirrored.Filled.Logout, "Cerrar sesión", null, tint = MaterialTheme.colorScheme.error) { confirmLogout = true }
+                } else {
+                    ListItem(
+                        headlineContent = { Text("Cuenta de Google") },
+                        supportingContent = { Text("Inicia sesión para sincronizar lo que ves entre tus dispositivos") },
+                        leadingContent = { Icon(Icons.Filled.AccountCircle, null, tint = MaterialTheme.colorScheme.primary) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                    Button(
+                        onClick = {
+                            val activity = context as? Activity ?: return@Button
+                            signingIn = true
+                            scope.launch {
+                                container.auth.signIn(activity)
+                                    .onSuccess { snackbar.showSnackbar("¡Hola, ${it.name}! Tus datos se sincronizarán.") }
+                                    .onFailure { snackbar.showSnackbar(it.message ?: "No se pudo iniciar sesión") }
+                                signingIn = false
+                            }
+                        },
+                        enabled = !signingIn,
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                    ) { Text("Iniciar sesión con Google") }
                 }
             }
-            Spacer(Modifier.height(32.dp))
+
+            Text(
+                "Aplicación desarrollada por Guillermo Ríos Correa",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 24.dp),
+            )
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
@@ -289,20 +283,6 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
             },
             dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("Cancelar") } },
         )
-    }
-}
-
-@Composable
-private fun StatCard(label: String, value: String, modifier: Modifier, onClick: () -> Unit) {
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = modifier.clip(MaterialTheme.shapes.medium).clickable(onClick = onClick),
-    ) {
-        Column(Modifier.padding(vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
     }
 }
 

@@ -51,14 +51,12 @@ fun AboutScreen(nav: NavController, settings: AppSettings) {
         ContextCompat.getDrawable(context, R.mipmap.ic_launcher)?.toBitmap(256, 256)?.asImageBitmap()
     }
 
-    SettingsPage(nav, "Acerca de") {
+    SettingsPage(nav, "Actualizaciones") {
         Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             icon?.let { Image(it, null, Modifier.size(96.dp).clip(RoundedCornerShape(24.dp))) }
             Spacer(Modifier.height(12.dp))
             BrandTitle(fontSize = 30.sp, showIcon = false)
             Text("Versión ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(8.dp))
-            Text("Aplicación desarrollada por Guillermo Ríos Correa", style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(16.dp))
             when (val s = state) {
                 UpdateState.Checking -> CircularProgressIndicator()

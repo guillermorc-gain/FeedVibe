@@ -27,7 +27,10 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -87,34 +90,42 @@ fun LibraryScreen(nav: NavController, settings: AppSettings) {
         topBarOverride = if (selection.active) {
             { EpisodeSelectionBar(selection, current) }
         } else null,
-        actions = {
-            if (groupIds.size > 1) {
-                IconButton(onClick = {
-                    val keys = groupIds.map(::groupKey).toSet()
-                    collapsed = if (allCollapsed) collapsed - keys else collapsed + keys
-                }) {
-                    Icon(
-                        if (allCollapsed) Icons.Filled.UnfoldMore else Icons.Filled.UnfoldLess,
-                        if (allCollapsed) "Desplegar todos" else "Contraer todos",
-                    )
-                }
-            }
-        },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            Text(
-                "Biblioteca",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
-            )
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp).heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Biblioteca",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (groupIds.size > 1) {
+                    IconButton(onClick = {
+                        val keys = groupIds.map(::groupKey).toSet()
+                        collapsed = if (allCollapsed) collapsed - keys else collapsed + keys
+                    }) {
+                        Icon(
+                            if (allCollapsed) Icons.Filled.UnfoldMore else Icons.Filled.UnfoldLess,
+                            if (allCollapsed) "Desplegar todos" else "Contraer todos",
+                        )
+                    }
+                }
+            }
             TabRow(selectedTabIndex = tab) {
                 tabs.forEachIndexed { i, (label, icon, list) ->
                     Tab(
                         selected = tab == i,
                         onClick = { tab = i; selection.clear() },
-                        text = { Text(if (list.isEmpty()) label else "$label (${list.size})", maxLines = 1) },
-                        icon = { Icon(icon, null) },
+                        text = { Text(label, maxLines = 1) },
+                        // El número de episodios, en un globo sobre el icono (cabe aunque la pantalla sea estrecha).
+                        icon = {
+                            BadgedBox(badge = { if (list.isNotEmpty()) Badge { Text(if (list.size > 999) "999+" else "${list.size}") } }) {
+                                Icon(icon, null)
+                            }
+                        },
                     )
                 }
             }

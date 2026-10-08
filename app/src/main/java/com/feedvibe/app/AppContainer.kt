@@ -24,6 +24,7 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 /** Inyección de dependencias manual. */
@@ -43,6 +44,7 @@ class AppContainer(val context: Context) {
     val drive = DriveBackup(context)
     val notifier = Notifier(context)
     val updater = AppUpdater(context)
+    val access = com.feedvibe.app.data.access.AccessManager(auth, settings, appScope, updater.currentVersion)
 
     init {
         cloud.onRemoteSubscriptionAdded = { sub ->
@@ -56,15 +58,39 @@ class AppContainer(val context: Context) {
         }
         // La sincronización en tiempo real solo funciona con la app a la vista (ahorra batería).
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) = cloud.setForeground(true)
+            override fun onStart(owner: LifecycleOwner) {
+                cloud.setForeground(true)
+                onAppOpened()
+            }
             override fun onStop(owner: LifecycleOwner) = cloud.setForeground(false)
         })
+        access.start()
         // Arranca/para la sincronización según haya sesión iniciada.
         appScope.launch {
             auth.user.collect { u ->
                 if (u != null) cloud.start(u.uid) else cloud.stop()
             }
         }
+    }
+
+    private var lastOpenCheck = 0L
+
+    /**
+     * Cada vez que se abre la app (o se vuelve a ella): buscar actualizaciones de la app y
+     * episodios nuevos. Lo marcado en otros dispositivos llega solo por la escucha en tiempo real.
+     */
+    private fun onAppOpened() = appScope.launch {
+        val now = System.currentTimeMillis()
+        // Si se vuelve a la app enseguida (p. ej. tras ver un vídeo) no se repite.
+        if (now - lastOpenCheck < 60_000) return@launch
+        lastOpenCheck = now
+        val s = settings.current()
+        val busy = updater.state.value.let { it is com.feedvibe.app.update.UpdateState.Downloading || it is com.feedvibe.app.update.UpdateState.Installing }
+        if (s.autoUpdateCheck && !busy) {
+            settings.setLastUpdateCheck(now)
+            launch { runCatching { updater.check() } }
+        }
+        if (s.refreshOnOpen && now - settings.lastRefresh.first() > 5 * 60_000) runCatching { feeds.refreshAll() }
     }
 
     private var backgroundStarted = false
@@ -82,6 +108,7 @@ class AppContainer(val context: Context) {
                 runCatching { feeds.repairOldUnwatched() }
                 settings.setRepairWatchedDone()
             }
+            feeds.pruneWatched()
             // Ya no se cargan automáticamente todos los vídeos de los canales al abrir: con muchos
             // canales la app se atascaba. Se hace al añadir un canal o desde su menú.
         }

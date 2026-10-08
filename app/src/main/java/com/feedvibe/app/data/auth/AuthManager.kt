@@ -34,17 +34,20 @@ class AuthManager(private val appContext: Context) {
 
     init {
         if (isAvailable) {
-            FirebaseAuth.getInstance().addAuthStateListener { auth ->
-                _user.value = auth.currentUser?.let {
-                    UserInfo(
-                        uid = it.uid,
-                        name = it.displayName.orEmpty(),
-                        email = it.email.orEmpty(),
-                        photoUrl = it.photoUrl?.toString()?.replace("s96-c", "s400-c"),
-                    )
-                }
-            }
+            // Ya desde el principio (sin esperar al aviso de Firebase): así no aparece un momento
+            // la pantalla de iniciar sesión cuando ya la tienes iniciada.
+            _user.value = toInfo(FirebaseAuth.getInstance().currentUser)
+            FirebaseAuth.getInstance().addAuthStateListener { auth -> _user.value = toInfo(auth.currentUser) }
         }
+    }
+
+    private fun toInfo(u: com.google.firebase.auth.FirebaseUser?) = u?.let {
+        UserInfo(
+            uid = it.uid,
+            name = it.displayName.orEmpty(),
+            email = it.email.orEmpty(),
+            photoUrl = it.photoUrl?.toString()?.replace("s96-c", "s400-c"),
+        )
     }
 
     val currentUid: String? get() = if (isAvailable) FirebaseAuth.getInstance().currentUser?.uid else null

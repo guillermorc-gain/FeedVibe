@@ -28,7 +28,8 @@ class FeedVibeApp : Application() {
                 .distinctUntilChanged()
                 .collect { (interval, wifi, other) ->
                     WorkScheduler.scheduleRefresh(this@FeedVibeApp, interval, wifi)
-                    WorkScheduler.scheduleBackup(this@FeedVibeApp, other.first)
+                    // Ya no hay copia automática en Drive (todo se sincroniza al momento): se cancela.
+                    WorkScheduler.scheduleBackup(this@FeedVibeApp, 0)
                     WorkScheduler.scheduleUpdateCheck(this@FeedVibeApp, other.second)
                 }
         }

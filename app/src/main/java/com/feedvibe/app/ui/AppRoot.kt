@@ -121,6 +121,13 @@ object HomeTabs {
 @Composable
 fun AppRoot(settings: AppSettings, external: ExternalRequest?, onExternalHandled: () -> Unit) {
     val container = LocalContainer.current
+    // Mientras la app no esté publicada, solo entran las cuentas autorizadas.
+    val access by container.access.access.collectAsStateWithLifecycle()
+    if (access != com.feedvibe.app.data.access.Access.ALLOWED) {
+        com.feedvibe.app.ui.screens.AccessScreen(access)
+        UpdateDialog()
+        return
+    }
     val nav = rememberNavController()
     androidx.compose.runtime.DisposableEffect(nav) {
         val l = androidx.navigation.NavController.OnDestinationChangedListener { _, d, _ ->

@@ -50,7 +50,7 @@ class CloudSync(
     private val available: Boolean,
 ) {
     @Volatile
-    private var firestore: FirebaseFirestore? = if (available) FirebaseFirestore.getInstance() else null
+    private var firestore: FirebaseFirestore? = null
     private val listeners = mutableListOf<ListenerRegistration>()
     private var uid: String? = null
 
@@ -80,13 +80,13 @@ class CloudSync(
 
     @Synchronized
     fun start(newUid: String) {
-        if (firestore == null || uid == newUid) return
+        if (!available || uid == newUid) return
         stop()
         uid = newUid
         _status.value = SyncStatus.CONNECTING
         _detail.value = null
         scope.launch {
-            dropOldQueue()
+            firestore = FirestoreHolder.get(settings)
             // Primer inicio de sesión de este usuario en este dispositivo: subir lo local.
             if (settings.syncedUid() != newUid) {
                 settings.setStateCursor(0)
@@ -117,23 +117,6 @@ class CloudSync(
             }
             updateListeners()
         }
-    }
-
-    /**
-     * Las versiones 1.0.92 y anteriores dejaron en el móvil una cola con miles de escrituras
-     * (una por episodio) que agotan el límite diario gratuito de Firebase cada vez que se
-     * reenvían. Se descartan una sola vez: ahora todo va en un documento por canal.
-     */
-    private suspend fun dropOldQueue() {
-        if (settings.firestoreQueueDropped()) return
-        val old = firestore ?: return
-        runCatching {
-            firestore = null
-            old.terminate().await()
-            old.clearPersistence().await()
-        }.onFailure { Log.w(TAG, "clearPersistence", it) }
-        firestore = FirebaseFirestore.getInstance()
-        settings.setFirestoreQueueDropped()
     }
 
     private fun explain(e: Throwable): String = when {
@@ -214,7 +197,8 @@ class CloudSync(
     /** Descarga puntual de cambios (lo usa el trabajo en segundo plano antes de notificar). */
     suspend fun pullOnce() {
         val u = uid ?: settings.syncedUid() ?: return
-        if (firestore == null) return
+        if (!available) return
+        firestore = FirestoreHolder.get(settings)
         runCatching {
             val docs = channels(u).whereGreaterThan("serverUpdatedAt", sinceCursor(settings.stateCursor())).get().await()
             applyRemoteChannels(docs.documents)

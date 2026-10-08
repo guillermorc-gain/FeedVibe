@@ -63,6 +63,11 @@ class FeedRepository(
     private val historyQueueMutex = Mutex()
     private val queuedHistory = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
+    companion object {
+        /** Episodios vistos que se guardan en el Historial de la Biblioteca. */
+        const val HISTORY_KEEP = 200
+    }
+
     fun queueFullHistory(subId: String) {
         if (!queuedHistory.add(subId)) return
         historyScope.launch {
@@ -203,11 +208,10 @@ class FeedRepository(
             // La información del canal (foto) solo se pide si aún no la tenemos.
             val feed = SourceResolver.fetch(sub.type, sub.sourceKey, hideShorts, full = sub.imageUrl == null, youtubeApiKey = apiKey)
             val existing = db.episodes().idsForSubscription(sub.id).toHashSet()
-            val entities = toEntities(sub, feed)
             // Los episodios que desaparecen del feed (YouTube solo da los 15 últimos) se conservan.
-            saveEpisodes(entities)
+            val saved = saveEpisodes(toEntities(sub, feed))
             val firstRefresh = sub.lastRefreshed == 0L
-            val newOnes = entities.filter { it.id !in existing }
+            val newOnes = saved.filter { it.id !in existing }
             val updatedSub = sub.copy(
                 title = sub.title.ifBlank { feed.title },
                 imageUrl = sub.imageUrl ?: feed.imageUrl,
@@ -218,7 +222,8 @@ class FeedRepository(
             )
             db.subscriptions().upsert(updatedSub)
             // Canal con historial completo que este dispositivo aún no tiene (restaurado, otro móvil…).
-            if (sub.fullHistory && existing.isEmpty()) queueFullHistory(sub.id)
+            // (Si ya hay estados del canal es que se cargó y se limpiaron los vistos.)
+            if (sub.fullHistory && existing.isEmpty() && db.states().countForSubscription(sub.id) == 0) queueFullHistory(sub.id)
             if (firstRefresh || newOnes.isEmpty()) null else NewEpisodes(updatedSub, newOnes)
         } catch (e: Exception) {
             // Sin conexión no es un fallo del canal: no se le marca con error.
@@ -285,6 +290,7 @@ class FeedRepository(
                     if (unseen.isEmpty()) null else n.copy(episodes = unseen)
                 }
                 com.feedvibe.app.CrashReport.note("Actualización terminada (${errors.get()} errores)")
+                pruneWatched()
                 RefreshResult(filtered, errors.get(), reasons.maxByOrNull { it.value }?.key)
             } finally {
                 _refreshing.value = false
@@ -331,8 +337,7 @@ class FeedRepository(
             val known = db.episodes().forSubscription(sub.id)
             val existing = known.map { it.id }.toHashSet()
             val oldestKnown = known.minOfOrNull { it.publishedAt }
-            val entities = toEntities(sub, episodes)
-            saveEpisodes(entities)
+            val entities = saveEpisodes(toEntities(sub, episodes))
             val newOnes = entities.filter { it.id !in existing }
             val newIds = newOnes.map { it.id }
             val toMark = if (markOldWatched) newOnes else {
@@ -347,6 +352,7 @@ class FeedRepository(
             }
             markHistoryWatched(sub.id, toMark.map { it.id })
             com.feedvibe.app.CrashReport.note("${sub.title}: ${entities.size} vídeos, ${newIds.size} nuevos, ${toMark.size} marcados")
+            pruneWatched()
             if (!sub.fullHistory) {
                 // Se sincroniza: el resto de dispositivos cargarán también el historial.
                 val updated = (db.subscriptions().get(sub.id) ?: sub).copy(fullHistory = true, updatedAt = System.currentTimeMillis())
@@ -356,11 +362,30 @@ class FeedRepository(
             newIds.size
         }
 
-    /** Guarda episodios sin perder la duración que ya se conocía si el feed no la trae (el RSS de YouTube no la da). */
-    private suspend fun saveEpisodes(episodes: List<EpisodeEntity>) {
-        val missing = episodes.filter { it.durationSec <= 0 }.map { it.id }
+    /**
+     * Guarda episodios sin perder la duración que ya se conocía si el feed no la trae (el RSS de
+     * YouTube no la da). Los ya vistos que se limpiaron ([pruneWatched]) no se vuelven a guardar.
+     * @return los episodios guardados.
+     */
+    private suspend fun saveEpisodes(episodes: List<EpisodeEntity>): List<EpisodeEntity> {
+        val ids = episodes.map { it.id }
+        val present = ids.chunked(500).flatMap { db.episodes().existingIds(it) }.toHashSet()
+        val seen = ids.filter { it !in present }.chunked(500).flatMap { db.states().getMany(it) }
+            .filter { it.watched && !it.favorite && !it.watchLater }.mapTo(HashSet()) { it.episodeId }
+        val keep = episodes.filter { it.id !in seen }
+        val missing = keep.filter { it.durationSec <= 0 }.map { it.id }
         val known = missing.chunked(500).flatMap { db.episodes().knownDurations(it) }.associate { it.id to it.durationSec }
-        db.episodes().upsertAll(episodes.map { e -> known[e.id]?.let { e.copy(durationSec = it) } ?: e })
+        db.episodes().upsertAll(keep.map { e -> known[e.id]?.let { e.copy(durationSec = it) } ?: e })
+        return keep
+    }
+
+    /**
+     * Para no guardar información inútil: los episodios vistos que no están en la Biblioteca se
+     * borran (se conserva solo su estado, que es pequeño y es lo que se sincroniza).
+     */
+    suspend fun pruneWatched() = withContext(Dispatchers.IO) {
+        runCatching { db.episodes().pruneWatched(HISTORY_KEEP) }
+            .onSuccess { if (it > 0) com.feedvibe.app.CrashReport.note("Limpiados $it episodios vistos") }
     }
 
     /** El reproductor averigua la duración de los vídeos que no la traían. */

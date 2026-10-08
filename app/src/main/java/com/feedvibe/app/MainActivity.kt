@@ -9,13 +9,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.lifecycleScope
 import com.feedvibe.app.data.prefs.AppSettings
 import com.feedvibe.app.notify.Notifier
 import com.feedvibe.app.ui.AppRoot
 import com.feedvibe.app.ui.LocalContainer
 import com.feedvibe.app.ui.theme.FeedVibeTheme
-import kotlinx.coroutines.launch
 
 /** Lo que llega de fuera: URL compartida o episodio tocado en una notificación. */
 data class ExternalRequest(val sharedUrl: String? = null, val episodeId: String? = null, val nonce: Long = System.nanoTime())
@@ -30,20 +28,7 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         com.feedvibe.app.update.UpdatedReceiver.clear(this)
 
-        // Solo al abrir la app de verdad, no cuando Android vuelve a crear la pantalla.
-        if (savedInstanceState == null) {
-            lifecycleScope.launch {
-                val s = container.settings.current()
-                if (s.refreshOnOpen) runCatching { container.feeds.refreshAll() }
-            }
-            lifecycleScope.launch {
-                // Buscar actualizaciones cada vez que se abre la app.
-                if (container.settings.current().autoUpdateCheck) {
-                    container.settings.setLastUpdateCheck(System.currentTimeMillis())
-                    container.updater.check()
-                }
-            }
-        }
+        // Al abrir la app se buscan actualizaciones y episodios nuevos (ver AppContainer.onAppOpened).
         container.startBackgroundJobs()
 
         setContent {
