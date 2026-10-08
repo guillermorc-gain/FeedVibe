@@ -28,9 +28,9 @@ object SourceResolver {
         }
     }
 
-    suspend fun fetch(type: SourceType, key: String, hideShorts: Boolean = false, full: Boolean = true): ParsedFeed =
+    suspend fun fetch(type: SourceType, key: String, hideShorts: Boolean = false, full: Boolean = true, youtubeApiKey: String = ""): ParsedFeed =
         when (type) {
-            SourceType.YOUTUBE -> YouTubeSource.fetch(key, hideShorts, fetchChannelInfo = full)
+            SourceType.YOUTUBE -> YouTubeSource.fetch(key, hideShorts, fetchChannelInfo = full, apiKey = youtubeApiKey)
             SourceType.TWITCH -> TwitchSource.fetch(key)
             SourceType.DAILYMOTION -> DailymotionSource.fetch(key)
             SourceType.VIMEO, SourceType.ODYSEE -> RssSource.fetch(key, type).copy(type = type)

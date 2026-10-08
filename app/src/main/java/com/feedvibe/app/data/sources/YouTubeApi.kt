@@ -125,6 +125,10 @@ object YouTubeApi {
         return all
     }
 
+    /** Los últimos vídeos (hasta 50) del canal o lista: plan B cuando falla el RSS (2 unidades de cuota). */
+    suspend fun fetchLatest(apiKey: String, key: String): List<ParsedEpisode> =
+        page(apiKey, uploadsPlaylist(key, false), null).first
+
     /** Comprueba la clave haciendo una llamada barata (1 unidad). */
     suspend fun validateKey(apiKey: String) {
         call(apiKey, "videos", mapOf("part" to "id", "id" to "dQw4w9WgXcQ"))

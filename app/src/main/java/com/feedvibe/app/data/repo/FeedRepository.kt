@@ -34,6 +34,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -41,7 +42,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 data class NewEpisodes(val subscription: SubscriptionEntity, val episodes: List<EpisodeEntity>)
 
-data class RefreshResult(val newEpisodes: List<NewEpisodes>, val errors: Int)
+/** [topError]: el motivo de error más repetido (para entender qué pasa cuando fallan muchos). */
+data class RefreshResult(val newEpisodes: List<NewEpisodes>, val errors: Int, val topError: String? = null)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FeedRepository(
@@ -195,10 +197,10 @@ class FeedRepository(
             )
         }
 
-    private suspend fun refreshSubscription(sub: SubscriptionEntity, hideShorts: Boolean): NewEpisodes? {
+    private suspend fun refreshSubscription(sub: SubscriptionEntity, hideShorts: Boolean, apiKey: String = ""): NewEpisodes? {
         return try {
             // La información del canal (foto) solo se pide si aún no la tenemos.
-            val feed = SourceResolver.fetch(sub.type, sub.sourceKey, hideShorts, full = sub.imageUrl == null)
+            val feed = SourceResolver.fetch(sub.type, sub.sourceKey, hideShorts, full = sub.imageUrl == null, youtubeApiKey = apiKey)
             val existing = db.episodes().idsForSubscription(sub.id).toHashSet()
             val entities = toEntities(sub, feed)
             // Los episodios que desaparecen del feed (YouTube solo da los 15 últimos) se conservan.
@@ -231,15 +233,31 @@ class FeedRepository(
                 val hideShorts = settings.current().hideShorts
                 // Los canales en pausa no se actualizan (salvo que se pida uno concreto).
                 val subs = db.subscriptions().getAll().filter { if (onlyIds == null) !it.paused else it.id in onlyIds }
+                val apiKey = youtubeApiKey()
                 val limiter = Semaphore(6)
+                // A YouTube, menos a la vez: muchas peticiones seguidas desde el mismo móvil hacen
+                // que empiece a rechazarlas.
+                val youtubeLimiter = Semaphore(3)
                 val errors = AtomicInteger(0)
+                val reasons = java.util.concurrent.ConcurrentHashMap<String, Int>()
                 val results = coroutineScope {
                     subs.map { sub ->
                         async {
                             limiter.withPermit {
-                                // Con límite de tiempo: un canal que no responde no bloquea al resto.
-                                runCatching { withTimeout(90_000) { refreshSubscription(sub, hideShorts) } }
-                                    .onFailure { errors.incrementAndGet() }
+                                val run: suspend () -> NewEpisodes? = {
+                                    // Con límite de tiempo: un canal que no responde no bloquea al resto.
+                                    withTimeout(90_000) { refreshSubscription(sub, hideShorts, apiKey) }
+                                }
+                                runCatching { if (sub.type == SourceType.YOUTUBE) youtubeLimiter.withPermit { run() } else run() }
+                                    .onFailure { e ->
+                                        errors.incrementAndGet()
+                                        val reason = if (e is TimeoutCancellationException) "No ha respondido a tiempo"
+                                        else e.message.orEmpty().replace(Regex(" al abrir \\S+"), "").ifBlank { "Error" }
+                                        if (e is TimeoutCancellationException) {
+                                            runCatching { db.subscriptions().setRefreshResult(sub.id, sub.lastRefreshed, reason) }
+                                        }
+                                        reasons.merge(reason.take(120), 1, Int::plus)
+                                    }
                                     .getOrNull()
                             }
                         }
@@ -253,7 +271,7 @@ class FeedRepository(
                     if (unseen.isEmpty()) null else n.copy(episodes = unseen)
                 }
                 com.feedvibe.app.CrashReport.note("Actualización terminada (${errors.get()} errores)")
-                RefreshResult(filtered, errors.get())
+                RefreshResult(filtered, errors.get(), reasons.maxByOrNull { it.value }?.key)
             } finally {
                 _refreshing.value = false
             }

@@ -42,6 +42,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -121,8 +122,9 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
         val msg = buildString {
             append(if (n == 0) "No hay episodios nuevos" else "$n episodios nuevos")
             if (r.errors > 0) append(" · ${r.errors} canales con error")
+            if (r.errors >= 3) r.topError?.let { append(": $it") }
         }
-        snackbar.showSnackbar(msg)
+        snackbar.showSnackbar(msg, duration = if (r.errors > 0) SnackbarDuration.Long else SnackbarDuration.Short)
     }
 
     val context = LocalContext.current
