@@ -88,6 +88,8 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
     val all by feeds.feedEpisodes.collectAsStateWithLifecycle(emptyList())
     val subs by feeds.subscriptionsWithCounts.collectAsStateWithLifecycle(emptyList())
     val categories by feeds.categories.collectAsStateWithLifecycle(emptyList())
+    // Mismo número que el globo de la pestaña: episodios sin ver.
+    val unwatched by feeds.unwatchedCount.collectAsStateWithLifecycle(0)
 
     var typeFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var categoryFilter by rememberSaveable { mutableStateOf<String?>(null) }
@@ -267,7 +269,7 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "Novedades",
+                            if (unwatched > 0) "Novedades ($unwatched)" else "Novedades",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.weight(1f),
