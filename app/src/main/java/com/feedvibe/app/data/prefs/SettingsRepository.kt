@@ -109,6 +109,8 @@ data class AppSettings(
     val radioRecordFolder: String = "",
     /** Grabar solo con Wi‑Fi. */
     val radioRecordWifiOnly: Boolean = false,
+    /** Formato de las grabaciones: ORIGINAL (MP3/AAC tal cual), FLAC o WAV. */
+    val radioRecordFormat: String = "FLAC",
     /** Últimos filtros de la radio: comunidad. */
     val radioState: String = "",
     /** Últimos filtros de la radio: estilo. */
@@ -155,6 +157,8 @@ class SettingsRepository(private val context: Context) {
         val radioQuality = stringPreferencesKey("radio_quality")
         val radioRecordFolder = stringPreferencesKey("radio_record_folder")
         val radioRecordWifiOnly = booleanPreferencesKey("radio_record_wifi_only")
+        val radioRecordFormat = stringPreferencesKey("radio_record_format")
+        val radioSchedules = stringPreferencesKey("radio_schedules")
         val radioFavorites = stringPreferencesKey("radio_favorites")
         val radioState = stringPreferencesKey("radio_state")
         val radioTag = stringPreferencesKey("radio_tag")
@@ -215,6 +219,7 @@ class SettingsRepository(private val context: Context) {
             radioQuality = p[K.radioQuality] ?: d.radioQuality,
             radioRecordFolder = p[K.radioRecordFolder] ?: d.radioRecordFolder,
             radioRecordWifiOnly = p[K.radioRecordWifiOnly] ?: d.radioRecordWifiOnly,
+            radioRecordFormat = p[K.radioRecordFormat] ?: d.radioRecordFormat,
             radioState = p[K.radioState] ?: d.radioState,
             radioTag = p[K.radioTag] ?: d.radioTag,
         )
@@ -263,6 +268,7 @@ class SettingsRepository(private val context: Context) {
             p[K.radioQuality] = n.radioQuality
             p[K.radioRecordFolder] = n.radioRecordFolder
             p[K.radioRecordWifiOnly] = n.radioRecordWifiOnly
+            p[K.radioRecordFormat] = n.radioRecordFormat
             p[K.radioState] = n.radioState
             p[K.radioTag] = n.radioTag
         }
@@ -300,6 +306,16 @@ class SettingsRepository(private val context: Context) {
     suspend fun toggleFavoriteStation(s: com.feedvibe.app.data.radio.Station) = context.dataStore.edit { p ->
         val list = stations(p[K.radioFavorites])
         p[K.radioFavorites] = stationsJson(if (list.any { it.id == s.id }) list.filter { it.id != s.id } else list + s)
+    }
+
+    /** Grabaciones programadas. */
+    val radioSchedules: Flow<List<com.feedvibe.app.radio.RecordJob>> = context.dataStore.data.map { p ->
+        p[K.radioSchedules]?.let { runCatching { com.feedvibe.app.data.sources.AppJson.decodeFromString<List<com.feedvibe.app.radio.RecordJob>>(it) }.getOrNull() }.orEmpty()
+    }
+
+    suspend fun editRadioSchedules(change: (List<com.feedvibe.app.radio.RecordJob>) -> List<com.feedvibe.app.radio.RecordJob>) = context.dataStore.edit { p ->
+        val list = p[K.radioSchedules]?.let { runCatching { com.feedvibe.app.data.sources.AppJson.decodeFromString<List<com.feedvibe.app.radio.RecordJob>>(it) }.getOrNull() }.orEmpty()
+        p[K.radioSchedules] = com.feedvibe.app.data.sources.AppJson.encodeToString(change(list))
     }
 
     suspend fun addRecentStation(s: com.feedvibe.app.data.radio.Station) = context.dataStore.edit { p ->

@@ -69,6 +69,14 @@ object Http {
             }
         }
 
+    /** Descarga binaria (p. ej. el logo de una emisora para las grabaciones). */
+    suspend fun bytes(url: String): ByteArray = withContext(Dispatchers.IO) {
+        client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+            if (!resp.isSuccessful) throw SourceException("Error ${resp.code} al abrir $url")
+            resp.body?.bytes() ?: ByteArray(0)
+        }
+    }
+
     suspend fun postJson(url: String, json: String, headers: Map<String, String> = emptyMap()): String =
         withContext(Dispatchers.IO) {
             val req = Request.Builder().url(url)

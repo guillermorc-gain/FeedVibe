@@ -63,11 +63,28 @@ fun RadioSettingsScreen(nav: NavController, settings: AppSettings) {
                 "Con datos móviles no se graba ni se descargan programas",
                 settings.radioRecordWifiOnly,
             ) { update { s -> s.copy(radioRecordWifiOnly = it) } }
-            ListItem(
-                headlineContent = { Text("Formato") },
-                supportingContent = { Text("FLAC, con el nombre de la emisora, el del programa y su logo") },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            )
         }
+
+        SectionTitle("Formato de las grabaciones")
+        SettingsGroup {
+            com.feedvibe.app.radio.RecordFormat.entries.forEach { f ->
+                ListItem(
+                    headlineContent = { Text(f.label) },
+                    supportingContent = {
+                        // Lo que ocupa 1 hora de una emisión típica de 128 kbps.
+                        Text("${f.detail}. 1 hora ≈ ${com.feedvibe.app.radio.formatSize(f.estimateBytes(128, 3600))}")
+                    },
+                    leadingContent = { androidx.compose.material3.RadioButton(selected = settings.radioRecordFormat == f.name, onClick = null) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.clickable { update { s -> s.copy(radioRecordFormat = f.name) } },
+                )
+            }
+        }
+        Text(
+            "Las grabaciones llevan el nombre de la emisora, el del programa y su logo. Se graba siempre en la máxima calidad que emite la radio; antes de grabar verás cuánto pesará.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+        )
     }
 }

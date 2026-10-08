@@ -27,7 +27,12 @@ data class Station(
 )
 
 /** Enlace de emisión con su calidad. */
-data class Stream(val url: String, val bitrate: Int, val format: String)
+data class Stream(val url: String, val bitrate: Int, val format: String) {
+    val isHls get() = format.equals("hls", true) || url.contains(".m3u8", true)
+}
+
+/** Episodio a la carta de un programa (se puede descargar). */
+data class Episode(val id: String, val title: String, val date: String, val durationSec: Long, val image: String?)
 
 /** Programa de la parrilla de una emisora. */
 data class ScheduleItem(val title: String, val showId: String?, val startMs: Long, val durationSec: Long, val image: String?) {
@@ -113,16 +118,39 @@ object TuneIn {
     suspend fun search(query: String): List<Station> =
         stations(json("${BASE}Search.ashx?query=" + URLEncoder.encode(query, "UTF-8")))
 
-    /** Enlaces de emisión de una emisora (puede haber varias calidades). */
+    /** Enlaces de emisión de una emisora (puede haber varias calidades). Las listas .pls/.m3u se abren. */
     suspend fun streams(id: String): List<Stream> {
         val root = json("${BASE}Tune.ashx?id=$id&formats=mp3,aac,ogg,hls")
         val list = ((root as? JsonObject)?.get("body") as? JsonArray).orEmpty().mapNotNull { e ->
             val url = e.str("url") ?: return@mapNotNull null
             Stream(url, e.long("bitrate")?.toInt() ?: 0, e.str("media_type").orEmpty())
-        }
+        }.mapNotNull { s -> runCatching { resolvePlaylist(s) }.getOrNull() }
         if (list.isEmpty()) throw SourceException("Esta emisora no tiene ninguna emisión disponible ahora")
         return list
     }
+
+    /** Las listas de reproducción (.pls, .m3u) llevan dentro el enlace de verdad. */
+    private suspend fun resolvePlaylist(s: Stream): Stream {
+        val path = s.url.substringBefore('?').lowercase()
+        if (!path.endsWith(".pls") && !path.endsWith(".m3u")) return s
+        val body = Http.get(s.url).body
+        val url = body.lineSequence().map { it.trim().substringAfter('=', it.trim()) }
+            .firstOrNull { it.startsWith("http") } ?: throw SourceException("Lista sin emisiones")
+        return s.copy(url = url)
+    }
+
+    /** Episodios recientes de un programa a la carta. */
+    suspend fun episodes(showId: String): List<Episode> = outlines(json("${BASE}Tune.ashx?c=pbrowse&id=$showId"))
+        .filter { it.str("guide_id")?.startsWith("t") == true }
+        .map { o ->
+            Episode(
+                id = o.str("guide_id")!!,
+                title = o.str("text").orEmpty(),
+                date = o.str("subtext").orEmpty(),
+                durationSec = o.str("topic_duration")?.toLongOrNull() ?: 0,
+                image = o.str("image")?.replace("http://", "https://"),
+            )
+        }
 
     /** Programación de hoy (y mañana si la hay). */
     suspend fun schedule(id: String): List<ScheduleItem> = outlines(json("${BASE}Browse.ashx?c=schedule&id=$id")).mapNotNull { o ->

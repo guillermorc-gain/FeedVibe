@@ -24,6 +24,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
@@ -326,17 +329,35 @@ private fun MiniPlayer(n: NowPlaying, onOpen: () -> Unit, onToggle: () -> Unit, 
     }
 }
 
-/** Escuchando: logo, canción, calidad y la programación de la emisora. */
+/** Escuchando: logo, canción, calidad, grabación y la programación de la emisora. */
 @Composable
 private fun PlayerSheet(n: NowPlaying, favorite: Boolean, onToggle: () -> Unit, onFavorite: () -> Unit) {
+    val container = LocalContainer.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)
+    val recording by com.feedvibe.app.radio.RecordService.state.collectAsStateWithLifecycle()
+    val scheduled by container.settings.radioSchedules.collectAsStateWithLifecycle(emptyList())
     var schedule by remember(n.station.id) { mutableStateOf<List<ScheduleItem>?>(null) }
+    var confirm by remember { mutableStateOf<com.feedvibe.app.radio.RecordJob?>(null) }
+    var byTime by remember { mutableStateOf(false) }
+    var episodesOf by remember { mutableStateOf<ScheduleItem?>(null) }
     LaunchedEffect(n.station.id) { schedule = runCatching { TuneIn.schedule(n.station.id) }.getOrDefault(emptyList()) }
     val hour = remember { SimpleDateFormat("HH:mm", Locale("es")) }
     val nowMs = System.currentTimeMillis()
+    val format = com.feedvibe.app.radio.RecordFormat.of(settings?.radioRecordFormat ?: "FLAC")
+    val kbps = n.stream?.bitrate ?: n.station.bitrate
+    fun estimate(seconds: Long) = com.feedvibe.app.radio.formatSize(format.estimateBytes(kbps, seconds))
+    val recordingHere = recording?.job?.stationId == n.station.id
+
+    fun job(program: String, start: Long, end: Long) = com.feedvibe.app.radio.RecordJob(
+        id = System.currentTimeMillis(), stationId = n.station.id, stationName = n.station.name,
+        image = n.station.image, program = program, startAtMs = start, endAtMs = end,
+    )
 
     LazyColumn(Modifier.fillMaxWidth().navigationBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
         item {
-            StationLogo(n.station.image, 180)
+            StationLogo(n.station.image, 160)
             Spacer(Modifier.height(12.dp))
             Text(n.station.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             n.track?.let { Text("Ahora: $it", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp)) }
@@ -356,7 +377,55 @@ private fun PlayerSheet(n: NowPlaying, favorite: Boolean, onToggle: () -> Unit, 
                 FilledIconButton(onClick = onToggle, modifier = Modifier.size(64.dp)) {
                     Icon(if (n.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(36.dp))
                 }
-                Spacer(Modifier.width(48.dp))
+                // Grabar ya (hasta pararlo) o parar la grabación.
+                IconButton(onClick = {
+                    if (recordingHere) com.feedvibe.app.radio.RecordService.stop(context)
+                    else com.feedvibe.app.radio.RecordService.start(context, job("", 0, 0))
+                }) {
+                    Icon(
+                        if (recordingHere) Icons.Filled.Stop else Icons.Filled.FiberManualRecord,
+                        if (recordingHere) "Parar la grabación" else "Grabar",
+                        tint = androidx.compose.ui.graphics.Color(0xFFE53935),
+                    )
+                }
+            }
+            recording?.takeIf { recordingHere }?.let { r ->
+                val secs = (System.currentTimeMillis() - r.startedMs) / 1000
+                Text(
+                    "● ${r.status} · " + String.format(Locale("es"), "%d:%02d:%02d", secs / 3600, (secs / 60) % 60, secs % 60) + " · " + com.feedvibe.app.radio.formatSize(r.bytes),
+                    color = androidx.compose.ui.graphics.Color(0xFFE53935),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+            Text(
+                "Grabar en ${format.label}: 1 hora ≈ ${estimate(3600)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            androidx.compose.material3.TextButton(onClick = { byTime = true }) { Text("Grabar por horario…") }
+            if (scheduled.isNotEmpty()) {
+                Text(
+                    "Grabaciones programadas",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+                scheduled.sortedBy { it.startAtMs }.forEach { j ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("${j.stationName}${if (j.program.isNotBlank()) " · ${j.program}" else ""}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                SimpleDateFormat("EEE d MMM, HH:mm", Locale("es")).format(Date(j.startAtMs)) + " – " + hour.format(Date(j.endAtMs)),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(onClick = {
+                            com.feedvibe.app.radio.RecordScheduler.cancel(context, j)
+                            scope.launch { container.settings.editRadioSchedules { l -> l.filter { it.id != j.id } } }
+                        }) { Icon(Icons.Filled.Close, "Cancelar") }
+                    }
+                }
             }
             Text(
                 "Programación",
@@ -369,11 +438,11 @@ private fun PlayerSheet(n: NowPlaying, favorite: Boolean, onToggle: () -> Unit, 
         when {
             list == null -> item { CircularProgressIndicator(Modifier.padding(16.dp)) }
             list.isEmpty() -> item {
-                Text("Esta emisora no publica su programación.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
+                Text("Esta emisora no publica su programación. Puedes grabar con el botón rojo o por horario.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
             }
-            else -> items(list.filter { it.endMs > nowMs - 3_600_000 }) { p ->
+            else -> items(list.filter { it.endMs > nowMs }) { p ->
                 val live = nowMs in p.startMs until p.endMs
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         hour.format(Date(p.startMs)),
                         style = MaterialTheme.typography.labelLarge,
@@ -383,14 +452,152 @@ private fun PlayerSheet(n: NowPlaying, favorite: Boolean, onToggle: () -> Unit, 
                     Column(Modifier.weight(1f)) {
                         Text(p.title, fontWeight = if (live) FontWeight.Bold else FontWeight.Normal, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(
-                            (if (live) "En directo · " else "") + "hasta las " + hour.format(Date(p.endMs)),
+                            (if (live) "En directo · " else "") + "hasta las " + hour.format(Date(p.endMs)) + " · ≈ " + estimate(p.durationSec),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                    if (p.showId != null) IconButton(onClick = { episodesOf = p }) {
+                        Icon(Icons.Filled.Download, "Episodios a la carta")
+                    }
+                    IconButton(onClick = { confirm = job(p.title, if (live) 0 else p.startMs, p.endMs) }) {
+                        Icon(Icons.Filled.FiberManualRecord, "Grabar este programa", tint = androidx.compose.ui.graphics.Color(0xFFE53935))
                     }
                 }
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
+
+    fun program(j: com.feedvibe.app.radio.RecordJob) {
+        if (j.startAtMs == 0L) {
+            com.feedvibe.app.radio.RecordService.start(context, j)
+        } else {
+            com.feedvibe.app.radio.RecordScheduler.schedule(context, j)
+            scope.launch { container.settings.editRadioSchedules { it + j } }
+        }
+    }
+
+    confirm?.let { j ->
+        val secs = ((j.endAtMs - (if (j.startAtMs == 0L) System.currentTimeMillis() else j.startAtMs)) / 1000).coerceAtLeast(60)
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text("Grabar «${j.program}»") },
+            text = {
+                Text(
+                    (if (j.startAtMs == 0L) "Empieza ahora" else "De ${hour.format(Date(j.startAtMs))}") + " hasta las ${hour.format(Date(j.endAtMs))}.\n" +
+                        "Formato ${format.label}: pesará unos ${estimate(secs)}." +
+                        if (format != com.feedvibe.app.radio.RecordFormat.ORIGINAL) "\nEn formato original serían unos ${com.feedvibe.app.radio.formatSize(com.feedvibe.app.radio.RecordFormat.ORIGINAL.estimateBytes(kbps, secs))}." else ""
+                )
+            },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { program(j); confirm = null }) { Text("Grabar") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirm = null }) { Text("Cancelar") } },
+        )
+    }
+
+    if (byTime) RecordByTimeDialog(
+        onDismiss = { byTime = false },
+        estimate = { secs -> estimate(secs) },
+        onConfirm = { start, end -> byTime = false; confirm = job("", start, end) },
+    )
+
+    episodesOf?.let { p -> EpisodesDialog(p, onDismiss = { episodesOf = null }) }
+}
+
+/** Grabar por horario: hora de inicio y duración. */
+@Composable
+private fun RecordByTimeDialog(onDismiss: () -> Unit, estimate: (Long) -> String, onConfirm: (Long, Long) -> Unit) {
+    val cal = remember { java.util.Calendar.getInstance() }
+    var startH by remember { mutableStateOf(cal.get(java.util.Calendar.HOUR_OF_DAY)) }
+    var startM by remember { mutableStateOf((cal.get(java.util.Calendar.MINUTE) / 5 + 1) * 5 % 60) }
+    var minutes by remember { mutableStateOf(60) }
+    fun startMs(): Long {
+        val c = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, startH); set(java.util.Calendar.MINUTE, startM)
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }
+        // Si la hora ya ha pasado hoy, es mañana.
+        if (c.timeInMillis < System.currentTimeMillis() - 60_000) c.add(java.util.Calendar.DAY_OF_MONTH, 1)
+        return c.timeInMillis
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Grabar por horario") },
+        text = {
+            Column {
+                Text("Empieza a las", style = MaterialTheme.typography.labelLarge)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { startH = (startH + 23) % 24 }) { Text("−") }
+                    Text(String.format(Locale("es"), "%02d", startH), style = MaterialTheme.typography.headlineSmall)
+                    IconButton(onClick = { startH = (startH + 1) % 24 }) { Text("+") }
+                    Text(":", style = MaterialTheme.typography.headlineSmall)
+                    IconButton(onClick = { startM = (startM + 55) % 60 }) { Text("−") }
+                    Text(String.format(Locale("es"), "%02d", startM), style = MaterialTheme.typography.headlineSmall)
+                    IconButton(onClick = { startM = (startM + 5) % 60 }) { Text("+") }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Duración", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(30, 60, 90, 120, 180, 240).forEach { m ->
+                        FilterChip(selected = minutes == m, onClick = { minutes = m }, label = { Text(if (m % 60 == 0) "${m / 60} h" else "$m min") })
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Pesará unos ${estimate(minutes * 60L)}", color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { val s = startMs(); onConfirm(s, s + minutes * 60_000L) }) { Text("Programar") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
+/** Episodios a la carta de un programa, para descargar. */
+@Composable
+private fun EpisodesDialog(p: ScheduleItem, onDismiss: () -> Unit) {
+    val container = LocalContainer.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var episodes by remember { mutableStateOf<List<com.feedvibe.app.data.radio.Episode>?>(null) }
+    var done by remember { mutableStateOf(setOf<String>()) }
+    LaunchedEffect(p.showId) { episodes = runCatching { TuneIn.episodes(p.showId!!) }.getOrDefault(emptyList()) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(p.title) },
+        text = {
+            val list = episodes
+            when {
+                list == null -> CircularProgressIndicator()
+                list.isEmpty() -> Text("Este programa no tiene episodios para descargar.")
+                else -> LazyColumn(Modifier.height(380.dp)) {
+                    items(list, key = { it.id }) { e ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(e.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    listOf(e.date, if (e.durationSec > 0) "${e.durationSec / 60} min · ≈ ${com.feedvibe.app.radio.formatSize(e.durationSec * 16_000)}" else "")
+                                        .filter { it.isNotBlank() }.joinToString(" · "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            IconButton(enabled = e.id !in done, onClick = {
+                                scope.launch {
+                                    runCatching {
+                                        val wifiOnly = container.settings.current().radioRecordWifiOnly
+                                        com.feedvibe.app.radio.EpisodeDownloader.download(context, e, p.title, wifiOnly)
+                                    }.onSuccess {
+                                        done = done + e.id
+                                        android.widget.Toast.makeText(context, "Descargando en Música/FeedVibe", android.widget.Toast.LENGTH_SHORT).show()
+                                    }.onFailure {
+                                        android.widget.Toast.makeText(context, it.message ?: "No se pudo descargar", android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }) { Icon(if (e.id in done) Icons.Filled.DownloadDone else Icons.Filled.Download, "Descargar") }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cerrar") } },
+    )
 }

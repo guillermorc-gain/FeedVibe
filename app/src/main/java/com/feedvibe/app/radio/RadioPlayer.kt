@@ -74,7 +74,8 @@ class RadioPlayer(
     /** Elige la emisión según el ajuste: máxima calidad o ahorro de datos. */
     private suspend fun pick(streams: List<Stream>): Stream {
         val saver = settings.current().radioQuality == "SAVER"
-        val sorted = streams.sortedBy { it.bitrate }
+        // ExoPlayer reproduce también HLS; se prefiere la emisión directa si la calidad es la misma.
+        val sorted = streams.sortedWith(compareBy<Stream> { it.bitrate }.thenBy { if (it.isHls) 0 else 1 })
         return if (saver) sorted.firstOrNull { it.bitrate >= 48 } ?: sorted.first() else sorted.last()
     }
 
