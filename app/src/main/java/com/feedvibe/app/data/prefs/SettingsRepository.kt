@@ -97,6 +97,22 @@ data class AppSettings(
     val feedCardWidth: Int = 360,
     /** Pantalla Canales: mostrar solo los que tienen episodios sin ver. */
     val channelsOnlyUnwatched: Boolean = true,
+    /** Orden de las pestañas (rutas separadas por comas). */
+    val tabOrder: String = "feed,channels,radio,library,profile",
+    /** Modo radio (se activa tocando el título): aparece la pestaña Radio. */
+    val radioMode: Boolean = false,
+    /** Calidad al escuchar la radio: MAX (máxima) o SAVER (ahorro de datos). */
+    val radioQuality: String = "MAX",
+    /** Carpeta para las grabaciones (URI del árbol elegido); vacío = Música/FeedVibe. */
+    val radioRecordFolder: String = "",
+    /** Grabar solo con Wi‑Fi. */
+    val radioRecordWifiOnly: Boolean = false,
+    /** Emisoras favoritas (JSON). */
+    val radioFavorites: String = "",
+    /** Últimos filtros de la radio: comunidad. */
+    val radioState: String = "",
+    /** Últimos filtros de la radio: estilo. */
+    val radioTag: String = "",
 )
 
 class SettingsRepository(private val context: Context) {
@@ -134,6 +150,14 @@ class SettingsRepository(private val context: Context) {
         val backfillV2 = booleanPreferencesKey("backfill_v2_done")
         val repairWatchedV1 = booleanPreferencesKey("repair_watched_v1_done")
         val channelsOnlyUnwatched = booleanPreferencesKey("channels_only_unwatched")
+        val tabOrder = stringPreferencesKey("tab_order")
+        val radioMode = booleanPreferencesKey("radio_mode")
+        val radioQuality = stringPreferencesKey("radio_quality")
+        val radioRecordFolder = stringPreferencesKey("radio_record_folder")
+        val radioRecordWifiOnly = booleanPreferencesKey("radio_record_wifi_only")
+        val radioFavorites = stringPreferencesKey("radio_favorites")
+        val radioState = stringPreferencesKey("radio_state")
+        val radioTag = stringPreferencesKey("radio_tag")
 
         val lastRefresh = longPreferencesKey("last_refresh")
         val lastBackup = longPreferencesKey("last_backup")
@@ -185,6 +209,14 @@ class SettingsRepository(private val context: Context) {
             iconBadge = p[K.iconBadge] ?: d.iconBadge,
             feedCardWidth = p[K.feedCardWidth] ?: d.feedCardWidth,
             channelsOnlyUnwatched = p[K.channelsOnlyUnwatched] ?: d.channelsOnlyUnwatched,
+            tabOrder = p[K.tabOrder] ?: d.tabOrder,
+            radioMode = p[K.radioMode] ?: d.radioMode,
+            radioQuality = p[K.radioQuality] ?: d.radioQuality,
+            radioRecordFolder = p[K.radioRecordFolder] ?: d.radioRecordFolder,
+            radioRecordWifiOnly = p[K.radioRecordWifiOnly] ?: d.radioRecordWifiOnly,
+            radioFavorites = p[K.radioFavorites] ?: d.radioFavorites,
+            radioState = p[K.radioState] ?: d.radioState,
+            radioTag = p[K.radioTag] ?: d.radioTag,
         )
     }
 
@@ -226,6 +258,14 @@ class SettingsRepository(private val context: Context) {
             p[K.iconBadge] = n.iconBadge
             p[K.feedCardWidth] = n.feedCardWidth
             p[K.channelsOnlyUnwatched] = n.channelsOnlyUnwatched
+            p[K.tabOrder] = n.tabOrder
+            p[K.radioMode] = n.radioMode
+            p[K.radioQuality] = n.radioQuality
+            p[K.radioRecordFolder] = n.radioRecordFolder
+            p[K.radioRecordWifiOnly] = n.radioRecordWifiOnly
+            p[K.radioFavorites] = n.radioFavorites
+            p[K.radioState] = n.radioState
+            p[K.radioTag] = n.radioTag
         }
     }
 

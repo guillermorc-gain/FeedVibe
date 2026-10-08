@@ -1,8 +1,23 @@
 """Diagnóstico 4: catálogo Radio Browser (España): comunidades, estilos y datos de emisora."""
 import json, urllib.request, urllib.parse
 UA = "FeedVibe/1.0 (diagnóstico)"
+import socket
+hosts = []
+try:
+    for info in socket.getaddrinfo("all.api.radio-browser.info", 443, proto=socket.IPPROTO_TCP):
+        ip = info[4][0]
+        try:
+            name = socket.gethostbyaddr(ip)[0]
+        except Exception as e:
+            name = None
+        print("IP", ip, "->", name)
+        if name and name not in hosts: hosts.append(name)
+except Exception as e:
+    print("DNS fallo", e)
+hosts += ["de2.api.radio-browser.info", "at1.api.radio-browser.info", "fr1.api.radio-browser.info", "de1.api.radio-browser.info"]
+print("HOSTS", hosts)
 def get(path):
-    for host in ["de1.api.radio-browser.info", "fi1.api.radio-browser.info", "nl1.api.radio-browser.info", "all.api.radio-browser.info"]:
+    for host in hosts:
         try:
             req = urllib.request.Request(f"https://{host}{path}", headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=30) as r:
