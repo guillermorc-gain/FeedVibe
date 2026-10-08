@@ -251,7 +251,7 @@ fun SyncScreen(nav: NavController, settings: AppSettings) {
                 headlineContent = { Text(if (user != null) "Sincronización en tiempo real activa" else "Sin iniciar sesión") },
                 supportingContent = {
                     Text(
-                        if (user != null) "Cuenta: ${user?.email}\nLo que marques como visto en un dispositivo se marcará al instante en los demás. Estado: ${status.name.lowercase()}"
+                        if (user != null) "Cuenta: ${user?.email}\nLo que marques como visto en un dispositivo se marcará al instante en los demás. Estado: ${status.name.lowercase()}" + (container.cloud.detail.value?.let { "\n$it" } ?: "")
                         else if (!container.auth.isAvailable) "Esta compilación no tiene Firebase configurado (ver README)."
                         else "Inicia sesión con Google en la pestaña Perfil para sincronizar canales y episodios vistos."
                     )

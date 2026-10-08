@@ -138,6 +138,7 @@ class SettingsRepository(private val context: Context) {
         val stateCursor = longPreferencesKey("channel_cursor")
         // v3: la sincronización pasó a un documento por canal; se repite la primera sincronización.
         val syncedUid = stringPreferencesKey("synced_uid_v3")
+        val firestoreQueueDropped = booleanPreferencesKey("firestore_queue_dropped")
         val profilePhotoVersion = longPreferencesKey("profile_photo_version")
         val onboardingDone = booleanPreferencesKey("onboarding_done")
     }
@@ -236,6 +237,8 @@ class SettingsRepository(private val context: Context) {
     val profilePhotoVersion: Flow<Long> = longFlow(K.profilePhotoVersion)
     suspend fun bumpProfilePhoto() = setLong(K.profilePhotoVersion, System.currentTimeMillis())
 
+    suspend fun firestoreQueueDropped(): Boolean = context.dataStore.data.first()[K.firestoreQueueDropped] == true
+    suspend fun setFirestoreQueueDropped() = context.dataStore.edit { it[K.firestoreQueueDropped] = true }
     suspend fun syncedUid(): String? = context.dataStore.data.first()[K.syncedUid]
     suspend fun setSyncedUid(uid: String?) = context.dataStore.edit {
         if (uid == null) it.remove(K.syncedUid) else it[K.syncedUid] = uid

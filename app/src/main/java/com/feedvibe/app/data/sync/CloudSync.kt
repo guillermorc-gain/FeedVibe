@@ -11,9 +11,14 @@ import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.Source
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,12 +49,17 @@ class CloudSync(
     private val scope: CoroutineScope,
     private val available: Boolean,
 ) {
-    private val firestore: FirebaseFirestore? = if (available) FirebaseFirestore.getInstance() else null
+    @Volatile
+    private var firestore: FirebaseFirestore? = if (available) FirebaseFirestore.getInstance() else null
     private val listeners = mutableListOf<ListenerRegistration>()
     private var uid: String? = null
 
     private val _status = MutableStateFlow(SyncStatus.OFF)
     val status: StateFlow<SyncStatus> = _status.asStateFlow()
+
+    /** Explicación del último error, para mostrarla junto al estado. */
+    private val _detail = MutableStateFlow<String?>(null)
+    val detail: StateFlow<String?> = _detail.asStateFlow()
 
     /** Llamado cuando llega una suscripción nueva desde otro dispositivo. */
     var onRemoteSubscriptionAdded: ((SubscriptionEntity) -> Unit)? = null
@@ -57,7 +67,7 @@ class CloudSync(
     var onRemoteFullHistory: ((SubscriptionEntity) -> Unit)? = null
     var onRemoteProfile: ((nickname: String?, photoBase64: String?, photoUpdatedAt: Long) -> Unit)? = null
 
-    private fun userDoc(u: String) = firestore!!.collection("users").document(u)
+    private fun userDoc(u: String) = (firestore ?: error("Firestore no disponible")).collection("users").document(u)
 
     /**
      * La app está a la vista. Las escuchas en tiempo real mantienen una conexión abierta
@@ -74,17 +84,23 @@ class CloudSync(
         stop()
         uid = newUid
         _status.value = SyncStatus.CONNECTING
+        _detail.value = null
         scope.launch {
+            dropOldQueue()
             // Primer inicio de sesión de este usuario en este dispositivo: subir lo local.
             if (settings.syncedUid() != newUid) {
                 settings.setStateCursor(0)
                 // Solo se da por sincronizado cuando la subida inicial termina bien. Si falla
-                // (sin conexión, base de datos aún no creada…) se reintenta cada vez más espaciado.
+                // (sin conexión, límite diario agotado…) se reintenta cada vez más espaciado.
                 var waitMs = 15_000L
                 while (true) {
                     if (synchronized(this@CloudSync) { uid != newUid }) return@launch
                     val ok = runCatching { uploadAll(newUid) }
-                        .onFailure { Log.w(TAG, "uploadAll", it); _status.value = SyncStatus.ERROR }
+                        .onFailure {
+                            Log.w(TAG, "uploadAll", it)
+                            _status.value = SyncStatus.ERROR
+                            _detail.value = explain(it)
+                        }
                         .isSuccess
                     if (ok) break
                     delay(waitMs)
@@ -96,10 +112,39 @@ class CloudSync(
                 if (uid == newUid) {
                     ready = true
                     _status.value = SyncStatus.SYNCED
+                    _detail.value = null
                 }
             }
             updateListeners()
         }
+    }
+
+    /**
+     * Las versiones 1.0.92 y anteriores dejaron en el móvil una cola con miles de escrituras
+     * (una por episodio) que agotan el límite diario gratuito de Firebase cada vez que se
+     * reenvían. Se descartan una sola vez: ahora todo va en un documento por canal.
+     */
+    private suspend fun dropOldQueue() {
+        if (settings.firestoreQueueDropped()) return
+        val old = firestore ?: return
+        runCatching {
+            firestore = null
+            old.terminate().await()
+            old.clearPersistence().await()
+        }.onFailure { Log.w(TAG, "clearPersistence", it) }
+        firestore = FirebaseFirestore.getInstance()
+        settings.setFirestoreQueueDropped()
+    }
+
+    private fun explain(e: Throwable): String = when {
+        e is TimeoutCancellationException -> "Firebase no responde; se reintentará solo."
+        (e as? FirebaseFirestoreException)?.code == FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED ->
+            "Se ha agotado el límite diario gratuito de Firebase. Se reanudará solo cuando se renueve (hacia las 9:00)."
+        (e as? FirebaseFirestoreException)?.code == FirebaseFirestoreException.Code.PERMISSION_DENIED ->
+            "Firebase rechaza el acceso: revisa las reglas de Firestore."
+        (e as? FirebaseFirestoreException)?.code == FirebaseFirestoreException.Code.UNAVAILABLE ->
+            "Sin conexión con Firebase; se reintentará solo."
+        else -> e.message ?: e.javaClass.simpleName
     }
 
     fun setForeground(value: Boolean) {
@@ -147,13 +192,14 @@ class CloudSync(
         listeners += channels(u)
             .whereGreaterThan("serverUpdatedAt", sinceCursor(cursor))
             .addSnapshotListener { snap, err ->
-                if (err != null) { _status.value = SyncStatus.ERROR; Log.w(TAG, "channels", err); return@addSnapshotListener }
+                if (err != null) { _status.value = SyncStatus.ERROR; _detail.value = explain(err); Log.w(TAG, "channels", err); return@addSnapshotListener }
                 // Los cambios propios aún sin confirmar (hasPendingWrites) ya están aplicados aquí.
                 val docs = snap?.documentChanges
                     ?.filter { it.type != DocumentChange.Type.REMOVED && !it.document.metadata.hasPendingWrites() }
                     ?.map { it.document } ?: return@addSnapshotListener
                 if (docs.isNotEmpty()) scope.launch { runCatching { applyRemoteChannels(docs) }.onFailure { Log.w(TAG, "apply", it) } }
                 _status.value = SyncStatus.SYNCED
+                _detail.value = null
             }
         listeners += userDoc(u).addSnapshotListener { snap, _ ->
             if (snap == null || !snap.exists()) return@addSnapshotListener
@@ -304,13 +350,13 @@ class CloudSync(
         put("serverUpdatedAt", FieldValue.serverTimestamp())
     }
 
-    fun pushSubscription(s: SubscriptionEntity) {
-        val u = uid ?: return
+    fun pushSubscription(s: SubscriptionEntity) = safely {
+        val u = uid ?: return@safely
         channels(u).document(s.id).set(channelData(s, emptyList()), SetOptions.merge())
     }
 
-    fun pushSubscriptionDeleted(id: String, at: Long) {
-        val u = uid ?: return
+    fun pushSubscriptionDeleted(id: String, at: Long) = safely {
+        val u = uid ?: return@safely
         channels(u).document(id).set(
             mapOf("deleted" to true, "updatedAt" to at, "serverUpdatedAt" to FieldValue.serverTimestamp()),
             SetOptions.merge(),
@@ -321,9 +367,9 @@ class CloudSync(
      * Una sola escritura por canal, con todos sus episodios cambiados. Las escrituras se
      * encolan offline y Firestore las envía al recuperar conexión.
      */
-    fun pushStates(states: List<EpisodeStateEntity>) {
-        val u = uid ?: return
-        val fs = firestore ?: return
+    fun pushStates(states: List<EpisodeStateEntity>) = safely {
+        val u = uid ?: return@safely
+        val fs = firestore ?: return@safely
         val byChannel = states.filter { it.subscriptionId != null }.groupBy { it.subscriptionId!! }
         byChannel.entries.chunked(400).forEach { chunk ->
             val batch = fs.batch()
@@ -332,8 +378,13 @@ class CloudSync(
         }
     }
 
-    fun pushProfile(nickname: String?, photoBase64: String?, photoUpdatedAt: Long?) {
-        val u = uid ?: return
+    /** Mientras se vacía la cola antigua no hay cliente de Firestore: se ignora el error. */
+    private inline fun safely(block: () -> Unit) {
+        runCatching(block).onFailure { Log.w(TAG, "push", it) }
+    }
+
+    fun pushProfile(nickname: String?, photoBase64: String?, photoUpdatedAt: Long?) = safely {
+        val u = uid ?: return@safely
         val data = buildMap<String, Any?> {
             if (nickname != null) put("nickname", nickname)
             if (photoUpdatedAt != null) {
@@ -350,7 +401,8 @@ class CloudSync(
      */
     private suspend fun uploadAll(u: String) {
         val fs = firestore ?: return
-        val remote = channels(u).get().await().documents
+        // Del servidor, no de la caché: sin conexión no se sabría qué hay en la nube.
+        val remote = withTimeout(60_000) { channels(u).get(Source.SERVER).await().documents }
         val remoteIds = remote.mapTo(HashSet()) { it.id }
         val pending = Pending()
         applyRemoteChannels(remote, pending)
@@ -363,7 +415,9 @@ class CloudSync(
             chunk.forEach { id ->
                 batch.set(channels(u).document(id), channelData(pending.subs[id], statesByChannel[id].orEmpty()), SetOptions.merge())
             }
-            batch.commit().await()
+            // Si Firebase tarda (p. ej. límite diario agotado) la escritura queda en cola y se
+            // envía sola más tarde: no se repite para no duplicarla.
+            withTimeoutOrNull(30_000) { batch.commit().await() }
         }
     }
 

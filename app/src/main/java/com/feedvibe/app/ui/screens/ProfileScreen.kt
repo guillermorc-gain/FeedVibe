@@ -62,6 +62,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -94,6 +95,7 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
     val unwatched by container.feeds.unwatchedCount.collectAsStateWithLifecycle(0)
     val watched by container.feeds.watchedCount.collectAsStateWithLifecycle(0)
     val syncStatus by container.cloud.status.collectAsStateWithLifecycle()
+    val syncDetail by container.cloud.detail.collectAsStateWithLifecycle()
 
     var photoSheet by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(false) }
@@ -168,6 +170,15 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
                             color = Color.White,
                             style = MaterialTheme.typography.labelMedium,
                         )
+                        syncDetail?.let {
+                            Text(
+                                it,
+                                color = Color.White.copy(alpha = 0.85f),
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 24.dp),
+                            )
+                        }
                     }
                     if (user == null) {
                         Spacer(Modifier.height(12.dp))
