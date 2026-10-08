@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
@@ -79,12 +80,57 @@ import com.feedvibe.app.ui.LocalContainer
 import com.feedvibe.app.ui.Routes
 import com.feedvibe.app.data.access.isAdmin
 import com.feedvibe.app.ui.components.UserAvatar
+import com.feedvibe.app.ui.components.ScreenScaffold
 import kotlinx.coroutines.launch
 import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** Pestaña Perfil: los ajustes de este dispositivo (no se sincronizan entre dispositivos). */
 @Composable
 fun ProfileScreen(nav: NavController, settings: AppSettings) {
+    val container = LocalContainer.current
+    val user by container.auth.user.collectAsStateWithLifecycle()
+    val localPhoto by container.profile.photo.collectAsStateWithLifecycle(null)
+    val photo = localPhoto ?: user?.photoUrl?.takeUnless { settings.hideGooglePhoto }
+    val displayName = settings.nickname.ifBlank { user?.name?.ifBlank { null } ?: "Invitado" }
+
+    ScreenScaffold(title = "FeedVibe", brand = true) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
+            SectionTitle("Ajustes")
+            SettingsGroup {
+                ListItem(
+                    headlineContent = { Text("Perfil") },
+                    supportingContent = { Text(if (user != null) "$displayName · ${user?.email}" else "Foto, nombre y cuenta de Google") },
+                    leadingContent = { UserAvatar(photo, 38.dp) },
+                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.clickable { nav.navigate(Routes.ACCOUNT) },
+                )
+                SettingsLink(Icons.Filled.Palette, "Apariencia", "Tema, colores y estilo de lista") { nav.navigate(Routes.APPEARANCE) }
+                SettingsLink(Icons.Filled.Sync, "Sincronización", "Periodo de actualización y dispositivos") { nav.navigate(Routes.SYNC) }
+                SettingsLink(Icons.Filled.Notifications, "Notificaciones", "Avisos de episodios nuevos y directos") { nav.navigate(Routes.NOTIFICATIONS) }
+                SettingsLink(Icons.Filled.PlayCircle, "Reproducción", "Cómo se abren los vídeos, Shorts…") { nav.navigate(Routes.PLAYBACK) }
+                SettingsLink(Icons.Filled.Backup, "Copias de seguridad", "Archivo en el teléfono y OPML") { nav.navigate(Routes.BACKUP) }
+                SettingsLink(Icons.Filled.SystemUpdate, "Actualizaciones", "Versión ${container.updater.currentVersion}") { nav.navigate(Routes.ABOUT) }
+                // Solo el administrador: quién usa la app y a quién se autoriza.
+                if (isAdmin(user)) {
+                    SettingsLink(Icons.Filled.Group, "Usuarios registrados", "Autorizar cuentas de Google") { nav.navigate(Routes.USERS) }
+                }
+            }
+            Text(
+                "Aplicación desarrollada por Guillermo Ríos Correa",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 24.dp),
+            )
+        }
+    }
+}
+
+/** Perfil: foto, nombre y la cuenta de Google (iniciar / cerrar sesión). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AccountScreen(nav: NavController, settings: AppSettings) {
     val container = LocalContainer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -99,7 +145,8 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
     var confirmLogout by remember { mutableStateOf(false) }
     var signingIn by remember { mutableStateOf(false) }
 
-    val photo = localPhoto ?: user?.photoUrl
+    val googlePhoto = user?.photoUrl
+    val photo = localPhoto ?: googlePhoto?.takeUnless { settings.hideGooglePhoto }
     val displayName = settings.nickname.ifBlank { user?.name?.ifBlank { null } ?: "Invitado" }
 
     fun setPhoto(uri: Uri?) {
@@ -107,6 +154,7 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
         scope.launch {
             runCatching { container.profile.setPhoto(uri) }
                 .onSuccess { snackbar.showSnackbar("Foto de perfil actualizada") }
+                .onSuccess { container.settings.update { s -> s.copy(hideGooglePhoto = false) } }
                 .onFailure { snackbar.showSnackbar(it.message ?: "No se pudo cambiar la foto") }
         }
     }
@@ -118,59 +166,37 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
     }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> if (ok) setPhoto(cameraUri) }
 
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            // ---------- Cabecera (discreta): foto y nombre ----------
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary.copy(alpha = 0.75f))
-                        )
-                    )
-                    .statusBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
+    ScreenScaffold(title = "Perfil", onBack = { nav.popBackStack() }, snackbar = snackbar) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
+            // ---------- Foto y nombre ----------
+            Column(
+                Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Box(Modifier.clickable { photoSheet = true }) {
-                    UserAvatar(photo, 64.dp, Modifier.border(3.dp, Color.White, CircleShape))
+                    UserAvatar(photo, 112.dp)
                     Box(
                         Modifier
                             .align(Alignment.BottomEnd)
-                            .size(24.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
-                            .background(Color.White)
-                            .padding(4.dp),
+                            .background(MaterialTheme.colorScheme.primary)
+                            .padding(7.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Filled.PhotoCamera, "Cambiar foto", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Filled.PhotoCamera, "Cambiar foto", tint = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
-                Spacer(Modifier.width(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).clickable { editName = true }) {
-                    Text(displayName, style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f, fill = false))
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { editName = true }) {
+                    Text(displayName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.width(6.dp))
-                    Icon(Icons.Filled.Edit, "Editar nombre", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
+                    Icon(Icons.Filled.Edit, "Editar nombre", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 }
             }
 
-            // ---------- Ajustes (de este dispositivo; no se sincronizan) ----------
-            SectionTitle("Ajustes")
-            SettingsGroup {
-                SettingsLink(Icons.Filled.Palette, "Apariencia", "Tema, colores y estilo de lista") { nav.navigate(Routes.APPEARANCE) }
-                SettingsLink(Icons.Filled.Sync, "Sincronización", "Periodo de actualización y dispositivos") { nav.navigate(Routes.SYNC) }
-                SettingsLink(Icons.Filled.Notifications, "Notificaciones", "Avisos de episodios nuevos y directos") { nav.navigate(Routes.NOTIFICATIONS) }
-                SettingsLink(Icons.Filled.PlayCircle, "Reproducción", "Cómo se abren los vídeos, Shorts…") { nav.navigate(Routes.PLAYBACK) }
-                SettingsLink(Icons.Filled.Backup, "Copias de seguridad", "Archivo en el teléfono y OPML") { nav.navigate(Routes.BACKUP) }
-                SettingsLink(Icons.Filled.SystemUpdate, "Actualizaciones", "Versión ${container.updater.currentVersion}") { nav.navigate(Routes.ABOUT) }
-            }
-
-            // ---------- Administración (solo la cuenta del administrador) ----------
-            if (isAdmin(user)) AdminSections(snackbar)
-
-            // ---------- Perfil: cuenta de Google y cerrar sesión ----------
-            SectionTitle("Perfil")
+            // ---------- Cuenta de Google y cerrar sesión ----------
+            SectionTitle("Cuenta de Google")
             SettingsGroup {
                 val u = user
                 if (u != null) {
@@ -223,16 +249,7 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
                     ) { Text("Iniciar sesión con Google") }
                 }
             }
-
-            Text(
-                "Aplicación desarrollada por Guillermo Ríos Correa",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 24.dp),
-            )
         }
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
 
     if (photoSheet) {
@@ -244,10 +261,22 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
                     photoSheet = false
                     gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }
-                if (localPhoto != null) {
-                    SheetOption(Icons.Filled.Delete, if (user?.photoUrl != null) "Usar la foto de Google" else "Eliminar foto") {
+                if (googlePhoto != null && (localPhoto != null || settings.hideGooglePhoto)) {
+                    SheetOption(Icons.Filled.AccountCircle, "Usar la foto de Google") {
                         photoSheet = false
-                        scope.launch { container.profile.removePhoto() }
+                        scope.launch {
+                            container.profile.removePhoto()
+                            container.settings.update { it.copy(hideGooglePhoto = false) }
+                        }
+                    }
+                }
+                if (photo != null) {
+                    SheetOption(Icons.Filled.Delete, "Quitar foto") {
+                        photoSheet = false
+                        scope.launch {
+                            container.profile.removePhoto()
+                            container.settings.update { it.copy(hideGooglePhoto = true) }
+                        }
                     }
                 }
             }

@@ -81,6 +81,8 @@ data class AppSettings(
     val channelGridSize: Int = 104,
     val channelGrid: Boolean = true,
     val showChannelNames: Boolean = true,
+    /** No mostrar la foto de la cuenta de Google como foto de perfil. */
+    val hideGooglePhoto: Boolean = false,
     /** Orden en Novedades: false = más recientes primero, true = más antiguos primero. */
     val feedOldestFirst: Boolean = false,
     /** Orden dentro de cada canal. */
@@ -122,6 +124,7 @@ class SettingsRepository(private val context: Context) {
         val channelGridSize = intPreferencesKey("channel_grid_size")
         val channelGrid = booleanPreferencesKey("channel_grid")
         val showChannelNames = booleanPreferencesKey("show_channel_names")
+        val hideGooglePhoto = booleanPreferencesKey("hide_google_photo")
         val feedOldestFirst = booleanPreferencesKey("feed_oldest_first")
         val channelOldestFirst = booleanPreferencesKey("channel_oldest_first")
         val channelHideWatched = booleanPreferencesKey("channel_hide_watched")
@@ -173,6 +176,7 @@ class SettingsRepository(private val context: Context) {
             channelGridSize = p[K.channelGridSize] ?: d.channelGridSize,
             channelGrid = p[K.channelGrid] ?: d.channelGrid,
             showChannelNames = p[K.showChannelNames] ?: d.showChannelNames,
+            hideGooglePhoto = p[K.hideGooglePhoto] ?: d.hideGooglePhoto,
             feedOldestFirst = p[K.feedOldestFirst] ?: d.feedOldestFirst,
             channelOldestFirst = p[K.channelOldestFirst] ?: d.channelOldestFirst,
             channelHideWatched = p[K.channelHideWatched] ?: d.channelHideWatched,
@@ -213,6 +217,7 @@ class SettingsRepository(private val context: Context) {
             p[K.channelGridSize] = n.channelGridSize
             p[K.channelGrid] = n.channelGrid
             p[K.showChannelNames] = n.showChannelNames
+            p[K.hideGooglePhoto] = n.hideGooglePhoto
             p[K.feedOldestFirst] = n.feedOldestFirst
             p[K.channelOldestFirst] = n.channelOldestFirst
             p[K.channelHideWatched] = n.channelHideWatched

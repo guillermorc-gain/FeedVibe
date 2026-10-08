@@ -35,6 +35,10 @@ import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material.icons.outlined.Subscriptions
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import com.feedvibe.app.ui.components.BrandTitle
+import com.feedvibe.app.ui.components.LocalTopBarInsets
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -96,6 +100,8 @@ object Routes {
     const val NOTIFICATIONS = "settings/notifications"
     const val PLAYBACK = "settings/playback"
     const val ABOUT = "settings/about"
+    const val ACCOUNT = "settings/account"
+    const val USERS = "settings/users"
     const val IMPORT_OPML = "import/opml"
 
     fun channel(id: String) = "channel/$id"
@@ -175,6 +181,8 @@ fun AppRoot(settings: AppSettings, external: ExternalRequest?, onExternalHandled
         composable(Routes.NOTIFICATIONS) { Detail { NotificationsScreen(nav, settings) } }
         composable(Routes.PLAYBACK) { Detail { PlaybackScreen(nav, settings) } }
         composable(Routes.ABOUT) { Detail { AboutScreen(nav, settings) } }
+        composable(Routes.ACCOUNT) { Detail { com.feedvibe.app.ui.screens.AccountScreen(nav, settings) } }
+        composable(Routes.USERS) { Detail { com.feedvibe.app.ui.screens.UsersScreen(nav) } }
         composable(Routes.IMPORT_OPML) { Detail { ImportOpmlScreen(nav) } }
     }
 
@@ -192,6 +200,7 @@ private fun Detail(content: @Composable () -> Unit) {
  * Las 4 pestañas en un carrusel: se cambia deslizando a los lados y da la vuelta
  * (de Perfil se pasa a Novedades y al revés).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
     val container = LocalContainer.current
@@ -218,6 +227,8 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        // Título fijo en todas las pestañas: al deslizar solo se mueve lo de debajo.
+        topBar = { CenterAlignedTopAppBar(title = { BrandTitle() }) },
         bottomBar = {
             NavigationBar {
                 tabs.forEachIndexed { index, tab ->
@@ -240,14 +251,16 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
     ) { padding ->
         HorizontalPager(
             state = pager,
-            modifier = Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding()),
+            modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding()),
             beyondViewportPageCount = 0,
         ) { page ->
-            when (Math.floorMod(page, tabs.size)) {
-                0 -> FeedScreen(nav, settings)
-                1 -> ChannelsScreen(nav, settings)
-                2 -> LibraryScreen(nav, settings)
-                else -> ProfileScreen(nav, settings)
+            androidx.compose.runtime.CompositionLocalProvider(LocalTopBarInsets provides WindowInsets(0, 0, 0, 0)) {
+                when (Math.floorMod(page, tabs.size)) {
+                    0 -> FeedScreen(nav, settings)
+                    1 -> ChannelsScreen(nav, settings)
+                    2 -> LibraryScreen(nav, settings)
+                    else -> ProfileScreen(nav, settings)
+                }
             }
         }
     }

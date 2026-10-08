@@ -98,6 +98,7 @@ fun SelectionTopBar(
         title = { Text("${selection.count} seleccionados", fontWeight = FontWeight.Bold) },
         navigationIcon = { IconButton(onClick = { selection.clear() }) { Icon(Icons.Filled.Close, "Cancelar selección") } },
         actions = actions,
+        windowInsets = topBarInsets(),
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
             titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,

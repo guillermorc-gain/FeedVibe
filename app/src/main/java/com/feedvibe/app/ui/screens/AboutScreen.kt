@@ -76,5 +76,8 @@ fun AboutScreen(nav: NavController, settings: AppSettings) {
                 scope.launch { container.settings.update { it.copy(autoUpdateCheck = on) } }
             }
         }
+        // Solo el administrador: publicar la app para todo el mundo.
+        val user by container.auth.user.collectAsStateWithLifecycle()
+        if (com.feedvibe.app.data.access.isAdmin(user)) PublicationSection()
     }
 }

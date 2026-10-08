@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -16,10 +15,21 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
+
+/**
+ * Barras superiores dentro de las pestañas principales: el título «FeedVibe» fijo ya ocupa la
+ * zona de la barra de estado, así que no hay que dejar ese hueco otra vez.
+ */
+val LocalTopBarInsets = compositionLocalOf<WindowInsets?> { null }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun topBarInsets(): WindowInsets = LocalTopBarInsets.current ?: TopAppBarDefaults.windowInsets
 
 /** Scaffold con barra superior; los insets inferiores los gestiona AppRoot. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -31,7 +41,10 @@ fun ScreenScaffold(
     actions: @Composable RowScope.() -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
     titleContent: (@Composable () -> Unit)? = null,
-    /** Pantallas principales: logotipo «FeedVibe» centrado en lugar del título. */
+    /**
+     * Pestañas principales: el logotipo «FeedVibe» lo pone fijo la pantalla de inicio, así que
+     * aquí no hay barra (salvo la de búsqueda o la de selección).
+     */
     brand: Boolean = false,
     /** Si no es null sustituye a la barra superior (p. ej. la barra de selección múltiple). */
     topBarOverride: (@Composable () -> Unit)? = null,
@@ -47,16 +60,7 @@ fun ScreenScaffold(
             if (topBarOverride != null) {
                 topBarOverride()
             } else if (brand && titleContent == null) {
-                CenterAlignedTopAppBar(
-                    title = { BrandTitle() },
-                    navigationIcon = {
-                        if (onBack != null) {
-                            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás") }
-                        }
-                    },
-                    actions = actions,
-                    scrollBehavior = scrollBehavior,
-                )
+                // Sin barra propia: el título fijo está en la pantalla de inicio.
             } else {
                 TopAppBar(
                     title = { if (titleContent != null) titleContent() else Text(title, fontWeight = FontWeight.Bold) },
@@ -66,6 +70,7 @@ fun ScreenScaffold(
                         }
                     },
                     actions = actions,
+                    windowInsets = topBarInsets(),
                     scrollBehavior = scrollBehavior,
                 )
             }
