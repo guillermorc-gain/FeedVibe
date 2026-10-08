@@ -87,7 +87,7 @@ import kotlinx.coroutines.launch
 /** Qué lista se está viendo. */
 private sealed interface RadioList {
     data object Popular : RadioList
-    data class Zone(val c: Category) : RadioList
+    data class Zone(val title: String, val places: List<com.feedvibe.app.data.radio.Place>) : RadioList
     data class Genre(val c: Category) : RadioList
     data object Favorites : RadioList
     data object Recent : RadioList
@@ -110,7 +110,6 @@ fun RadioScreen(nav: NavController, settings: AppSettings) {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
-    var zones by remember { mutableStateOf<List<Category>>(emptyList()) }
     var genres by remember { mutableStateOf<List<Category>>(emptyList()) }
     var zoneMenu by remember { mutableStateOf(false) }
     var genreMenu by remember { mutableStateOf(false) }
@@ -118,7 +117,6 @@ fun RadioScreen(nav: NavController, settings: AppSettings) {
     var playerSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        runCatching { zones = TuneIn.zones() }
         runCatching { genres = TuneIn.genres() }
     }
     LaunchedEffect(list) {
@@ -129,7 +127,7 @@ fun RadioScreen(nav: NavController, settings: AppSettings) {
         runCatching {
             when (l) {
                 RadioList.Popular -> TuneIn.popular()
-                is RadioList.Zone -> TuneIn.browse(l.c.url)
+                is RadioList.Zone -> TuneIn.local(l.places)
                 is RadioList.Genre -> TuneIn.browse(l.c.url)
                 is RadioList.Search -> TuneIn.search(l.q).filter { !it.isShow }
                 else -> emptyList()
@@ -189,13 +187,9 @@ fun RadioScreen(nav: NavController, settings: AppSettings) {
                     FilterChip(
                         selected = z != null,
                         onClick = { zoneMenu = true },
-                        label = { Text(z?.c?.title ?: "Zona") },
+                        label = { Text(z?.title ?: "Zona") },
                         trailingIcon = { Icon(Icons.Filled.ArrowDropDown, null) },
                     )
-                    DropdownMenu(expanded = zoneMenu, onDismissRequest = { zoneMenu = false }) {
-                        if (zones.isEmpty()) DropdownMenuItem(text = { Text("Cargando…") }, onClick = {})
-                        zones.forEach { c -> DropdownMenuItem(text = { Text(c.title) }, onClick = { zoneMenu = false; list = RadioList.Zone(c) }) }
-                    }
                 }
                 Box {
                     val g = list as? RadioList.Genre
@@ -238,6 +232,8 @@ fun RadioScreen(nav: NavController, settings: AppSettings) {
             now?.let { n -> MiniPlayer(n, onOpen = { playerSheet = true }, onToggle = { radio.toggle() }, onStop = { radio.stop() }) }
         }
     }
+
+    if (zoneMenu) ZonePicker(onDismiss = { zoneMenu = false }) { title, places -> zoneMenu = false; list = RadioList.Zone(title, places) }
 
     val playing = now
     if (playerSheet && playing != null) {
@@ -593,6 +589,51 @@ private fun EpisodesDialog(p: ScheduleItem, onDismiss: () -> Unit) {
                                     }
                                 }
                             }) { Icon(if (e.id in done) Icons.Filled.DownloadDone else Icons.Filled.Download, "Descargar") }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cerrar") } },
+    )
+}
+
+/** Elegir zona: comunidad autónoma entera o una de sus islas o provincias. */
+@Composable
+private fun ZonePicker(onDismiss: () -> Unit, onPick: (String, List<com.feedvibe.app.data.radio.Place>) -> Unit) {
+    var open by remember { mutableStateOf<String?>(null) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Zona") },
+        text = {
+            LazyColumn(Modifier.height(440.dp)) {
+                com.feedvibe.app.data.radio.SPAIN_REGIONS.forEach { r ->
+                    item(key = r.name) {
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                if (r.places.size == 1) onPick(r.name, r.places) else open = if (open == r.name) null else r.name
+                            }.padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(r.name, Modifier.weight(1f), fontWeight = if (open == r.name) FontWeight.Bold else FontWeight.Normal)
+                            if (r.places.size > 1) Icon(Icons.Filled.ArrowDropDown, null)
+                        }
+                    }
+                    if (open == r.name) {
+                        item(key = r.name + "/todo") {
+                            Text(
+                                "Toda ${r.name}",
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.fillMaxWidth().clickable { onPick(r.name, r.places) }.padding(start = 20.dp, top = 8.dp, bottom = 8.dp),
+                            )
+                        }
+                        r.places.forEach { p ->
+                            item(key = r.name + "/" + p.name) {
+                                Text(
+                                    p.name,
+                                    modifier = Modifier.fillMaxWidth().clickable { onPick(p.name, listOf(p)) }.padding(start = 20.dp, top = 8.dp, bottom = 8.dp),
+                                )
+                            }
                         }
                     }
                 }

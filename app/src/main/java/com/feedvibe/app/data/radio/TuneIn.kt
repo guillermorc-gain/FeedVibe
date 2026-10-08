@@ -100,6 +100,17 @@ object TuneIn {
         .filter { it.str("guide_id")?.startsWith("r") == true }
         .map { Category(it.str("text").orEmpty(), it.str("URL").orEmpty()) }
 
+    /** Emisoras locales cerca de un sitio (TuneIn las agrupa por cercanía). */
+    suspend fun local(place: Place): List<Station> =
+        stations(json("${BASE}Browse.ashx?c=local&latlon=${place.lat},${place.lon}")).filter { !it.isShow }
+
+    /** Emisoras de varios sitios juntas (p. ej. toda una comunidad), sin repetir. */
+    suspend fun local(places: List<Place>): List<Station> = kotlinx.coroutines.coroutineScope {
+        places.map { p -> kotlinx.coroutines.async { runCatching { local(p) }.getOrDefault(emptyList()) } }
+            .flatMap { it.await() }
+            .distinctBy { it.id }
+    }
+
     /** Estilos con emisoras en España. */
     suspend fun genres(): List<Category> = outlines(json("${BASE}Browse.ashx?id=$SPAIN&pivot=genre&filter=country"))
         .filter { it.str("type") == "link" && it.str("URL") != null }
