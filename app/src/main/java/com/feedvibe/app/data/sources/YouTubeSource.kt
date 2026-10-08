@@ -63,11 +63,19 @@ object YouTubeSource {
         else "https://www.youtube.com/feeds/videos.xml?channel_id=$id"
     }
 
-    suspend fun fetch(key: String, hideShorts: Boolean, fetchChannelInfo: Boolean): ParsedFeed {
-        val feed = fetchRssWithFallbacks(key, hideShorts)
+    suspend fun fetch(key: String, hideShorts: Boolean, fetchChannelInfo: Boolean, apiKey: String = ""): ParsedFeed {
+        var rssError: String? = null
+        val feed = runCatching { fetchRssWithFallbacks(key, hideShorts) }.onFailure { rssError = it.message }.getOrNull()
+            // Plan B: la API oficial (si hay clave), más fiable que leer la página.
+            ?: apiKey.takeIf { it.isNotBlank() }?.let { k ->
+                runCatching { YouTubeApi.fetchLatest(k, key) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { eps ->
+                    ParsedFeed(type = SourceType.YOUTUBE, sourceKey = key, title = "", description = "", imageUrl = null, siteUrl = null, episodes = eps)
+                }
+            }
             ?: runCatching { YouTubePage.fetch(key) }.getOrNull()?.takeIf { it.episodes.isNotEmpty() }
             ?: throw SourceException(
-                "YouTube no está respondiendo con la lista de vídeos de este canal. Prueba otra vez en unos minutos."
+                "YouTube no está respondiendo con la lista de vídeos de este canal" +
+                    (rssError?.let { " ($it)" } ?: "") + ". Prueba otra vez en unos minutos."
             )
         val id = key.substringAfter(':')
         val site = if (key.startsWith("playlist:")) "https://www.youtube.com/playlist?list=$id"
@@ -107,16 +115,21 @@ object YouTubeSource {
             add(feedUrl(key))
             if (key.startsWith("channel:")) add("https://www.youtube.com/feeds/videos.xml?playlist_id=UU${id.removePrefix("UC")}")
         }.distinct()
+        var last: SourceException? = null
         for (url in urls) {
             repeat(2) { attempt ->
                 try {
                     val feed = RssSource.fetch(url, SourceType.YOUTUBE)
                     if (feed.episodes.isNotEmpty() || url == urls.last()) return feed
                 } catch (e: SourceException) {
+                    last = e
+                    // Demasiadas peticiones: insistir solo empeora el bloqueo.
+                    if (e.message.orEmpty().contains("429")) throw e
                     if (attempt == 0) kotlinx.coroutines.delay(700)
                 }
             }
         }
+        last?.let { throw it }
         return null
     }
 
