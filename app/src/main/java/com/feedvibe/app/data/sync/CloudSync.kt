@@ -19,7 +19,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.delay
@@ -56,6 +60,34 @@ class CloudSync(
 
     private val _status = MutableStateFlow(SyncStatus.OFF)
     val status: StateFlow<SyncStatus> = _status.asStateFlow()
+
+    /** Trabajos de sincronización en marcha (subidas pendientes, cambios recibidos…). */
+    private val _activity = MutableStateFlow(0)
+
+    /** Se está sincronizando ahora mismo (para la animación del título). */
+    val syncing: Flow<Boolean> = combine(_status, _activity) { st, n -> st == SyncStatus.CONNECTING || n > 0 }
+        .distinctUntilChanged()
+
+    private suspend fun <T> busy(block: suspend () -> T): T {
+        _activity.update { it + 1 }
+        try {
+            return block()
+        } finally {
+            _activity.update { it - 1 }
+        }
+    }
+
+    /**
+     * Una escritura cuenta como «sincronizando» hasta que el servidor la confirma (como mucho
+     * 10 s: sin conexión se queda en cola y no hay que tener la animación todo el rato).
+     */
+    private fun track(task: com.google.android.gms.tasks.Task<*>) {
+        val done = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun finish() { if (done.compareAndSet(false, true)) _activity.update { it - 1 } }
+        _activity.update { it + 1 }
+        task.addOnCompleteListener { finish() }
+        scope.launch { delay(10_000); finish() }
+    }
 
     /** Explicación del último error, para mostrarla junto al estado. */
     private val _detail = MutableStateFlow<String?>(null)
@@ -180,7 +212,7 @@ class CloudSync(
                 val docs = snap?.documentChanges
                     ?.filter { it.type != DocumentChange.Type.REMOVED && !it.document.metadata.hasPendingWrites() }
                     ?.map { it.document } ?: return@addSnapshotListener
-                if (docs.isNotEmpty()) scope.launch { runCatching { applyRemoteChannels(docs) }.onFailure { Log.w(TAG, "apply", it) } }
+                if (docs.isNotEmpty()) scope.launch { runCatching { busy { applyRemoteChannels(docs) } }.onFailure { Log.w(TAG, "apply", it) } }
                 _status.value = SyncStatus.SYNCED
                 _detail.value = null
             }
@@ -201,7 +233,7 @@ class CloudSync(
         firestore = FirestoreHolder.get(settings)
         runCatching {
             val docs = channels(u).whereGreaterThan("serverUpdatedAt", sinceCursor(settings.stateCursor())).get().await()
-            applyRemoteChannels(docs.documents)
+            busy { applyRemoteChannels(docs.documents) }
         }.onFailure { Log.w(TAG, "pullOnce", it) }
     }
 
@@ -336,15 +368,15 @@ class CloudSync(
 
     fun pushSubscription(s: SubscriptionEntity) = safely {
         val u = uid ?: return@safely
-        channels(u).document(s.id).set(channelData(s, emptyList()), SetOptions.merge())
+        track(channels(u).document(s.id).set(channelData(s, emptyList()), SetOptions.merge()))
     }
 
     fun pushSubscriptionDeleted(id: String, at: Long) = safely {
         val u = uid ?: return@safely
-        channels(u).document(id).set(
+        track(channels(u).document(id).set(
             mapOf("deleted" to true, "updatedAt" to at, "serverUpdatedAt" to FieldValue.serverTimestamp()),
             SetOptions.merge(),
-        )
+        ))
     }
 
     /**
@@ -358,7 +390,7 @@ class CloudSync(
         byChannel.entries.chunked(400).forEach { chunk ->
             val batch = fs.batch()
             chunk.forEach { (subId, list) -> batch.set(channels(u).document(subId), channelData(null, list), SetOptions.merge()) }
-            batch.commit()
+            track(batch.commit())
         }
     }
 
@@ -376,7 +408,7 @@ class CloudSync(
                 put("photoUpdatedAt", photoUpdatedAt)
             }
         }
-        if (data.isNotEmpty()) userDoc(u).set(data, SetOptions.merge())
+        if (data.isNotEmpty()) track(userDoc(u).set(data, SetOptions.merge()))
     }
 
     /**

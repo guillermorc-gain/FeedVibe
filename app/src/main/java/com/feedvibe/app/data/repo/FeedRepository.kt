@@ -43,8 +43,16 @@ import java.util.concurrent.atomic.AtomicInteger
 
 data class NewEpisodes(val subscription: SubscriptionEntity, val episodes: List<EpisodeEntity>)
 
-/** [topError]: el motivo de error más repetido (para entender qué pasa cuando fallan muchos). */
-data class RefreshResult(val newEpisodes: List<NewEpisodes>, val errors: Int, val topError: String? = null)
+/**
+ * [topError]: el motivo de error más repetido (para entender qué pasa cuando fallan muchos).
+ * [failed]: canal que ha fallado -> motivo.
+ */
+data class RefreshResult(
+    val newEpisodes: List<NewEpisodes>,
+    val errors: Int,
+    val topError: String? = null,
+    val failed: Map<String, String> = emptyMap(),
+)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FeedRepository(
@@ -247,6 +255,7 @@ class FeedRepository(
                 val youtubeLimiter = Semaphore(3)
                 val errors = AtomicInteger(0)
                 val reasons = java.util.concurrent.ConcurrentHashMap<String, Int>()
+                val failed = java.util.concurrent.ConcurrentHashMap<String, String>()
                 val offline = java.util.concurrent.ConcurrentLinkedQueue<SubscriptionEntity>()
                 suspend fun pass(list: List<SubscriptionEntity>, retrying: Boolean): List<NewEpisodes> = coroutineScope {
                     list.map { sub ->
@@ -270,6 +279,7 @@ class FeedRepository(
                                             runCatching { db.subscriptions().setRefreshResult(sub.id, sub.lastRefreshed, reason) }
                                         }
                                         reasons.merge(reason.take(120), 1, Int::plus)
+                                        failed[sub.title.ifBlank { sub.sourceKey }] = reason.take(120)
                                     }
                                     .getOrNull()
                             }
@@ -291,7 +301,7 @@ class FeedRepository(
                 }
                 com.feedvibe.app.CrashReport.note("Actualización terminada (${errors.get()} errores)")
                 pruneWatched()
-                RefreshResult(filtered, errors.get(), reasons.maxByOrNull { it.value }?.key)
+                RefreshResult(filtered, errors.get(), reasons.maxByOrNull { it.value }?.key, failed.toMap())
             } finally {
                 _refreshing.value = false
             }

@@ -206,6 +206,9 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
     val container = LocalContainer.current
     val scope = rememberCoroutineScope()
     val unwatched by container.feeds.unwatchedCount.collectAsStateWithLifecycle(0)
+    // Animación del título: buscando episodios nuevos / sincronizando.
+    val refreshing by container.feeds.refreshing.collectAsStateWithLifecycle()
+    val syncing by container.cloud.syncing.collectAsStateWithLifecycle(false)
     val start = remember { val half = Int.MAX_VALUE / 2; half - half % tabs.size }
     val pager = rememberPagerState(initialPage = start) { Int.MAX_VALUE }
     val current = Math.floorMod(pager.currentPage, tabs.size)
@@ -228,7 +231,7 @@ private fun HomeScreen(nav: NavHostController, settings: AppSettings) {
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         // Título fijo en todas las pestañas: al deslizar solo se mueve lo de debajo.
-        topBar = { CenterAlignedTopAppBar(title = { BrandTitle() }) },
+        topBar = { CenterAlignedTopAppBar(title = { BrandTitle(refreshing = refreshing, syncing = syncing) }) },
         bottomBar = {
             NavigationBar {
                 tabs.forEachIndexed { index, tab ->

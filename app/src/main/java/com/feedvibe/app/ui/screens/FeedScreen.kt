@@ -122,11 +122,20 @@ fun FeedScreen(nav: NavController, settings: AppSettings) {
         val n = r.newEpisodes.sumOf { it.episodes.size }
         val msg = buildString {
             append(if (n == 0) "No hay episodios nuevos" else "$n episodios nuevos")
-            if (r.errors > 0) append(" · ${r.errors} canales con error")
-            if (r.errors >= 3) r.topError?.let {
-                append(": $it")
-                // Android no deja a la app usar internet (p. ej. datos en segundo plano restringidos).
-                if (it.startsWith("Sin conexión")) append(". Si tienes internet, revisa en Ajustes del móvil → Aplicaciones → FeedVibe que pueda usar datos en segundo plano y que la batería esté «Sin restricciones»")
+            when {
+                r.errors in 1..2 -> {
+                    // Pocos: qué canal y por qué (el canal queda marcado en Canales).
+                    append(" · No se pudo actualizar ")
+                    append(r.failed.entries.joinToString("; ") { (name, why) -> "«$name» ($why)" })
+                }
+                r.errors >= 3 -> {
+                    append(" · ${r.errors} canales con error")
+                    r.topError?.let {
+                        append(": $it")
+                        // Android no deja a la app usar internet (p. ej. datos en segundo plano restringidos).
+                        if (it.startsWith("Sin conexión")) append(". Si tienes internet, revisa en Ajustes del móvil → Aplicaciones → FeedVibe que pueda usar datos en segundo plano y que la batería esté «Sin restricciones»")
+                    }
+                }
             }
         }
         snackbar.showSnackbar(msg, duration = if (r.errors > 0) SnackbarDuration.Long else SnackbarDuration.Short)

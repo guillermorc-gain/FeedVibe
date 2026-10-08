@@ -1,6 +1,13 @@
 package com.feedvibe.app.ui.components
 
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
@@ -56,9 +63,77 @@ private object BrandColors {
     val yellow = Color(0xFFFFE201)
 }
 
-/** «FeedVibe» con el icono y los degradados del logotipo. */
+/**
+ * «FeedVibe» con el icono y los degradados del logotipo.
+ * @param refreshing buscando episodios nuevos: una luz del color del tema palpita detrás.
+ * @param syncing sincronizando con otros dispositivos: caen flechas hacia el título.
+ */
 @Composable
-fun BrandTitle(modifier: Modifier = Modifier, fontSize: TextUnit = 26.sp, showIcon: Boolean = true) {
+fun BrandTitle(
+    modifier: Modifier = Modifier,
+    fontSize: TextUnit = 26.sp,
+    showIcon: Boolean = true,
+    refreshing: Boolean = false,
+    syncing: Boolean = false,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    val transition = rememberInfiniteTransition(label = "actividad")
+    // Luz que palpita (solo se usa mientras se buscan episodios).
+    val pulse by transition.animateFloat(
+        initialValue = 0.15f,
+        targetValue = 0.75f,
+        animationSpec = infiniteRepeatable(tween(850, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulso",
+    )
+    // Avance de la lluvia de flechas (0 → 1 en bucle).
+    val rain by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1300, easing = LinearEasing)),
+        label = "lluvia",
+    )
+    val effects = Modifier.drawBehind {
+        if (refreshing) {
+            // Halo ovalado detrás de las letras.
+            val w = size.width * 1.15f
+            val h = size.height * 2.2f
+            scale(scaleX = 1f, scaleY = h / w, pivot = center) {
+                drawCircle(
+                    Brush.radialGradient(
+                        listOf(accent.copy(alpha = pulse), accent.copy(alpha = pulse * 0.35f), Color.Transparent),
+                        center = center,
+                        radius = w / 2,
+                    ),
+                    radius = w / 2,
+                    center = center,
+                )
+            }
+        } else if (syncing) {
+            val arrows = 7
+            val stroke = 2.dp.toPx()
+            val len = size.height * 0.45f
+            val head = len * 0.35f
+            for (i in 0 until arrows) {
+                // Cada flecha cae con un desfase distinto, de arriba hacia el título.
+                val phase = (rain + i * 0.37f) % 1f
+                val x = size.width * (i + 0.5f) / arrows + ((i * 13) % 7 - 3) * 2f
+                val y = -size.height * 0.9f + phase * size.height * 1.4f
+                val alpha = kotlin.math.sin(phase * Math.PI).toFloat() * 0.9f
+                val c = accent.copy(alpha = alpha)
+                drawLine(c, Offset(x, y - len), Offset(x, y), stroke, StrokeCap.Round)
+                drawLine(c, Offset(x - head, y - head), Offset(x, y), stroke, StrokeCap.Round)
+                drawLine(c, Offset(x + head, y - head), Offset(x, y), stroke, StrokeCap.Round)
+            }
+        }
+    }
+    Box(modifier.then(effects), contentAlignment = Alignment.Center) {
+        BrandLogo(fontSize = fontSize, showIcon = showIcon)
+    }
+}
+
+@Composable
+private fun BrandLogo(fontSize: TextUnit, showIcon: Boolean) {
+    val modifier = Modifier
     val context = LocalContext.current
     val icon = remember {
         ContextCompat.getDrawable(context, R.mipmap.ic_launcher)?.toBitmap(128, 128)?.asImageBitmap()
