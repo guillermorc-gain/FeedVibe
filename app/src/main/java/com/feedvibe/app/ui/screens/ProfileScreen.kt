@@ -95,7 +95,14 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
 
     ScreenScaffold(title = "FeedVibe", brand = true) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
-            SectionTitle("Ajustes")
+            // Márgenes justos para que quepa todo sin hacer scroll.
+            Text(
+                "Ajustes",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 4.dp),
+            )
             SettingsGroup {
                 ListItem(
                     headlineContent = { Text("Perfil") },
@@ -121,7 +128,7 @@ fun ProfileScreen(nav: NavController, settings: AppSettings) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 24.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp),
             )
         }
     }

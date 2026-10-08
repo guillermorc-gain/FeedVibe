@@ -64,6 +64,12 @@
             android:supportsPictureInPicture="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation" />
 
+        <!-- Detecta que se cierra la app del todo (quitarla de recientes). -->
+        <service
+            android:name=".AppCloseService"
+            android:exported="false"
+            android:stopWithTask="false" />
+
         <!-- Mantiene el vídeo sonando con la pantalla apagada o la app en segundo plano. -->
         <service
             android:name=".ui.PlaybackService"

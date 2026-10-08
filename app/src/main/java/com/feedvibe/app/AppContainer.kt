@@ -79,7 +79,14 @@ class AppContainer(val context: Context) {
      * Cada vez que se abre la app (o se vuelve a ella): buscar actualizaciones de la app y
      * episodios nuevos. Lo marcado en otros dispositivos llega solo por la escucha en tiempo real.
      */
+    /** Se ha cerrado la app del todo (quitada de recientes o salida con Atrás). */
+    fun appClosed() {
+        notifier.clearAll()
+        appScope.launch { settings.setAppClosed(true) }
+    }
+
     private fun onAppOpened() = appScope.launch {
+        settings.setAppClosed(false)
         val now = System.currentTimeMillis()
         // Si se vuelve a la app enseguida (p. ej. tras ver un vídeo) no se repite.
         if (now - lastOpenCheck < 60_000) return@launch
@@ -113,7 +120,9 @@ class AppContainer(val context: Context) {
             // canales la app se atascaba. Se hace al añadir un canal o desde su menú.
         }
         appScope.launch {
-            combine(feeds.unwatchedCount, settings.settings.map { it.iconBadge }) { n, on -> if (on) n else 0 }
+            combine(feeds.unwatchedCount, settings.settings.map { it.iconBadge }, settings.appClosed) { n, on, closed ->
+                if (on && !closed) n else 0
+            }
                 .distinctUntilChanged()
                 .debounce(1500)
                 .collect { notifier.updateBadge(it) }

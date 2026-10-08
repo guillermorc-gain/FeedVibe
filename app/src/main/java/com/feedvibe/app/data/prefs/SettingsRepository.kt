@@ -143,6 +143,7 @@ class SettingsRepository(private val context: Context) {
         val syncedUid = stringPreferencesKey("synced_uid_v3")
         val firestoreQueueDropped = booleanPreferencesKey("firestore_queue_dropped")
         val accessCache = stringPreferencesKey("access_cache")
+        val appClosed = booleanPreferencesKey("app_closed")
         val profilePhotoVersion = longPreferencesKey("profile_photo_version")
         val onboardingDone = booleanPreferencesKey("onboarding_done")
     }
@@ -245,6 +246,10 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun firestoreQueueDropped(): Boolean = context.dataStore.data.first()[K.firestoreQueueDropped] == true
     suspend fun setFirestoreQueueDropped() = context.dataStore.edit { it[K.firestoreQueueDropped] = true }
+    /** La app se cerró del todo: no se muestran avisos ni número en el icono hasta abrirla. */
+    val appClosed: Flow<Boolean> = context.dataStore.data.map { it[K.appClosed] == true }
+    suspend fun setAppClosed(v: Boolean) = context.dataStore.edit { it[K.appClosed] = v }
+
     /** Última decisión de acceso: "*" si la app es pública o el correo autorizado. */
     suspend fun accessCache(): String? = context.dataStore.data.first()[K.accessCache]
     suspend fun setAccessCache(v: String?) = context.dataStore.edit {

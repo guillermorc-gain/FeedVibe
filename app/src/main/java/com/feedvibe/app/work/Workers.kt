@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import com.feedvibe.app.FeedVibeApp
 import com.feedvibe.app.data.backup.DriveAuthRequired
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.first
 
 /** Actualiza todos los canales en segundo plano y notifica las novedades. */
 class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -24,7 +25,9 @@ class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         c.cloud.pullOnce()
         val result = c.feeds.refreshAll()
         val s = c.settings.current()
-        if (s.notificationsEnabled) c.notifier.notifyNewEpisodes(result.newEpisodes, s.notifyLive)
+        // Con la app cerrada del todo no se avisa (se pidió que entonces no salga nada).
+        val closed = c.settings.appClosed.first()
+        if (s.notificationsEnabled && !closed) c.notifier.notifyNewEpisodes(result.newEpisodes, s.notifyLive)
         return Result.success()
     }
 }

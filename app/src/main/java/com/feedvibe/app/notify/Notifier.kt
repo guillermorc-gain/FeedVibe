@@ -158,6 +158,12 @@ class Notifier(private val context: Context) {
      * silenciosa y mínima (sin icono en la barra de estado) con setNumber; con 0 se quita.
      * Sin texto o como «secreta», Samsung puede no mostrar el número.
      */
+    /** App cerrada del todo: fuera los avisos de episodios y el número del icono. */
+    fun clearAll() {
+        runCatching { NotificationManagerCompat.from(context).cancelAll() }
+        updateBadge(0)
+    }
+
     @SuppressLint("MissingPermission")
     fun updateBadge(count: Int) {
         val nm = NotificationManagerCompat.from(context)

@@ -30,6 +30,8 @@ class MainActivity : ComponentActivity() {
 
         // Al abrir la app se buscan actualizaciones y episodios nuevos (ver AppContainer.onAppOpened).
         container.startBackgroundJobs()
+        // Para saber cuándo se cierra la app del todo (ver AppCloseService).
+        runCatching { startService(Intent(this, AppCloseService::class.java)) }
 
         setContent {
             val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)
@@ -46,6 +48,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        // Salir con Atrás también cierra la app: fuera avisos y número del icono.
+        if (isFinishing && !isChangingConfigurations) (application as FeedVibeApp).container.appClosed()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
