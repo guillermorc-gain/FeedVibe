@@ -51,9 +51,10 @@ class AppContainer(val context: Context) {
         cloud.onRemoteSubscriptionAdded = { sub ->
             appScope.launch { runCatching { feeds.refreshOne(sub.id) } }
         }
-        cloud.onRemoteFullHistory = { sub ->
-            feeds.queueFullHistory(sub.id)
-        }
+        // Ya no se carga el historial completo solo porque otro dispositivo lo hiciera: aquí los
+        // vídeos vistos no estarían marcados (solo se sincroniza lo marcado a mano) y saldrían
+        // miles de vídeos antiguos como «sin ver».
+        cloud.onRemoteFullHistory = null
         cloud.onRemoteRadioFavorites = { json, at ->
             appScope.launch { settings.applyRemoteRadioFavorites(json, at) }
         }
@@ -124,6 +125,10 @@ class AppContainer(val context: Context) {
             if (!settings.repairWatchedDone()) {
                 runCatching { feeds.repairOldUnwatched() }
                 settings.setRepairWatchedDone()
+            }
+            if (!settings.repairReloadDone()) {
+                runCatching { feeds.repairReloadedHistory() }
+                settings.setRepairReloadDone()
             }
             feeds.pruneWatched()
             // Ya no se cargan automáticamente todos los vídeos de los canales al abrir: con muchos

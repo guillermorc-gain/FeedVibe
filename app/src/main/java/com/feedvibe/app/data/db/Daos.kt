@@ -163,6 +163,16 @@ interface EpisodeDao {
     @Query("SELECT id FROM episodes WHERE id IN (:ids)")
     suspend fun existingIds(ids: List<String>): List<String>
 
+    /** Episodios sin tocar que llegaron después de [since] y ya eran antiguos al llegar. */
+    @Query(
+        """
+        SELECT e.id, e.subscriptionId FROM episodes e
+        LEFT JOIN episode_states s ON s.episodeId = e.id
+        WHERE s.episodeId IS NULL AND e.discoveredAt > :since AND e.publishedAt < e.discoveredAt - :age
+        """
+    )
+    suspend fun reloadedOld(since: Long, age: Long): List<EpisodeSubId>
+
     @Query("SELECT * FROM episodes WHERE id IN (:ids)")
     suspend fun getMany(ids: List<String>): List<EpisodeEntity>
 

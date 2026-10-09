@@ -235,7 +235,10 @@ class FeedRepository(
             db.subscriptions().upsert(updatedSub)
             // Canal con historial completo que este dispositivo aún no tiene (restaurado, otro móvil…).
             // (Si ya hay estados del canal es que se cargó y se limpiaron los vistos.)
-            if (sub.fullHistory && existing.isEmpty() && db.states().countForSubscription(sub.id) == 0) queueFullHistory(sub.id)
+            // Solo la primera vez en este dispositivo (canal llegado de otro dispositivo o de una
+            // copia). Antes también se cargaba si el canal se quedaba sin episodios al limpiar los
+            // vistos, y se volvían a descargar miles de vídeos antiguos.
+            if (sub.fullHistory && firstRefresh && existing.isEmpty()) queueFullHistory(sub.id)
             if (firstRefresh || newOnes.isEmpty()) null else NewEpisodes(updatedSub, newOnes)
         } catch (e: Exception) {
             // Sin conexión no es un fallo del canal: no se le marca con error.
@@ -364,7 +367,9 @@ class FeedRepository(
                 val until = watchedUntil(sub.id)
                 newOnes.filter {
                     (until != null && it.publishedAt <= until) ||
-                        (auto && oldestKnown != null && it.publishedAt < oldestKnown)
+                        (auto && oldestKnown != null && it.publishedAt < oldestKnown) ||
+                        // Publicado antes de la última vez que se miró el canal: ya no es nuevo.
+                        (auto && sub.lastRefreshed > 0 && it.publishedAt < sub.lastRefreshed)
                 }
             }
             markHistoryWatched(sub.id, toMark.map { it.id })
@@ -416,6 +421,19 @@ class FeedRepository(
         val watched = episodes.map { it.id }.chunked(500).flatMap { db.states().getMany(it) }
             .filter { it.watched }.map { it.episodeId }.toHashSet()
         return episodes.filter { it.id in watched }.maxOfOrNull { it.publishedAt }
+    }
+
+    /**
+     * Reparación (una vez): vídeos antiguos que han entrado estos días como «sin ver» al volver a
+     * cargarse el historial de canales ya vistos. Si cuando llegaron ya tenían más de una semana,
+     * no son novedades: se marcan como vistos (solo en este dispositivo, como el resto del historial).
+     */
+    suspend fun repairReloadedHistory() = withContext(Dispatchers.IO) {
+        val since = System.currentTimeMillis() - 3 * 24 * 3600_000L
+        db.episodes().reloadedOld(since, 7 * 24 * 3600_000L).groupBy { it.subscriptionId }.forEach { (subId, list) ->
+            markHistoryWatched(subId, list.map { it.id })
+        }
+        pruneWatched()
     }
 
     /**
