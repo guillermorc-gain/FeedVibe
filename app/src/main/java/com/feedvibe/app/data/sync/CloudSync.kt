@@ -207,8 +207,20 @@ class CloudSync(
         else -> e.message ?: e.javaClass.simpleName
     }
 
+    private var periodicFlush: kotlinx.coroutines.Job? = null
+
     fun setForeground(value: Boolean) {
         synchronized(this) { foreground = value }
+        if (!value) flush()
+        synchronized(this) {
+            periodicFlush?.cancel()
+            periodicFlush = if (value) scope.launch {
+                while (true) {
+                    delay(10 * 60_000L)
+                    flush()
+                }
+            } else null
+        }
         scope.launch {
             // Al salir un momento (abrir un vídeo, mirar otra app) la escucha sigue unos minutos:
             // volver a engancharla lee otra vez los canales recientes.
@@ -494,8 +506,39 @@ class CloudSync(
      * Una sola escritura por canal, con todos sus episodios cambiados. Las escrituras se
      * encolan offline y Firestore las envía al recuperar conexión.
      */
+    /** Cambios de estado aún por enviar (se mandan juntos al salir de la app). */
+    private val pendingStates = LinkedHashMap<String, EpisodeStateEntity>()
+
+    /**
+     * Con la app a la vista los cambios se acumulan y se envían todos juntos al salirse o cerrarla
+     * (y cada 10 minutos por si se queda abierta): así el otro dispositivo los recibe al abrirse y
+     * se gasta mucho menos del límite diario. Sin la app a la vista (avisos, trabajos en segundo
+     * plano) se envían en el momento.
+     */
     fun pushStates(states: List<EpisodeStateEntity>) {
-        val u = uid ?: return
+        if (states.isEmpty()) return
+        val queued = synchronized(this) {
+            states.forEach { pendingStates[it.episodeId] = it }
+            foreground
+        }
+        if (!queued) flush()
+    }
+
+    /** Envía ya los cambios pendientes. */
+    fun flush() {
+        val batch = synchronized(this) {
+            if (pendingStates.isEmpty()) return
+            pendingStates.values.toList().also { pendingStates.clear() }
+        }
+        sendStates(batch)
+    }
+
+    private fun sendStates(states: List<EpisodeStateEntity>) {
+        val u = uid ?: run {
+            // Aún sin sesión lista: vuelven a la cola para el próximo envío.
+            synchronized(this) { states.forEach { pendingStates.putIfAbsent(it.episodeId, it) } }
+            return
+        }
         // En orden (un solo hilo): dos cambios seguidos del mismo episodio no se adelantan.
         scope.launch(pushDispatcher) {
             runCatching {

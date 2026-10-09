@@ -92,6 +92,8 @@ class AppContainer(val context: Context) {
      */
     /** Se ha cerrado la app del todo (quitada de recientes o salida con Atrás). */
     fun appClosed() {
+        // Lo marcado se envía ya a la nube para que el otro dispositivo lo tenga al abrirse.
+        cloud.flush()
         notifier.clearAll()
         appScope.launch { settings.setAppClosed(true) }
     }
@@ -108,6 +110,9 @@ class AppContainer(val context: Context) {
             settings.setLastUpdateCheck(now)
             launch { runCatching { updater.check() } }
         }
+        // Primero lo que se marcó en otros dispositivos y después los episodios nuevos: así lo ya
+        // visto allí no entra aquí como nuevo.
+        runCatching { kotlinx.coroutines.withTimeoutOrNull(20_000) { cloud.pullOnce() } }
         if (s.refreshOnOpen && now - settings.lastRefresh.first() > 5 * 60_000) runCatching { feeds.refreshAll() }
     }
 
