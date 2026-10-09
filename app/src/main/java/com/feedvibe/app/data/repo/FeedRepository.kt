@@ -468,7 +468,10 @@ class FeedRepository(
 
     // ---------- Estado de episodios ----------
 
-    private suspend fun updateStates(ids: List<String>, change: (EpisodeStateEntity) -> EpisodeStateEntity) {
+    /** Última vez que se envió a la nube la posición de cada episodio. */
+    private val positionPushed = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private suspend fun updateStates(ids: List<String>, push: Boolean = true, change: (EpisodeStateEntity) -> EpisodeStateEntity) {
         if (ids.isEmpty()) return
         val now = System.currentTimeMillis()
         val existing = ids.chunked(500).flatMap { db.states().getMany(it) }.associateBy { it.episodeId }
@@ -481,7 +484,7 @@ class FeedRepository(
             change(base).copy(updatedAt = now, subscriptionId = base.subscriptionId ?: subIds[id])
         }
         db.states().upsertAll(updated)
-        cloud.pushStates(updated)
+        if (push) cloud.pushStates(updated)
     }
 
     suspend fun setWatched(ids: List<String>, watched: Boolean) = updateStates(ids) {
@@ -499,7 +502,16 @@ class FeedRepository(
 
     suspend fun toggleFavorite(item: EpisodeItem) = updateStates(listOf(item.episode.id)) { it.copy(favorite = !item.favorite) }
 
-    suspend fun savePosition(id: String, positionMs: Long) = updateStates(listOf(id)) { it.copy(positionMs = positionMs) }
+    /**
+     * El reproductor guarda la posición cada 15 s; a la nube solo va cada 2 minutos (cada envío es
+     * una escritura y una lectura en cada dispositivo, y el límite diario gratuito es limitado).
+     */
+    suspend fun savePosition(id: String, positionMs: Long) {
+        val now = System.currentTimeMillis()
+        val push = now - (positionPushed[id] ?: 0L) >= 120_000
+        if (push) positionPushed[id] = now
+        updateStates(listOf(id), push) { it.copy(positionMs = positionMs) }
+    }
 
     /** Marca como vistos este episodio y todos los anteriores del mismo canal. */
     suspend fun markOlderWatched(item: EpisodeItem) {

@@ -139,21 +139,30 @@ class CloudSync(
             // Primer inicio de sesión de este usuario en este dispositivo: subir lo local.
             if (settings.syncedUid() != newUid) {
                 settings.setStateCursor(0)
-                // Solo se da por sincronizado cuando la subida inicial termina bien. Si falla
-                // (sin conexión, límite diario agotado…) se reintenta cada vez más espaciado.
-                var waitMs = 15_000L
+                // Solo se da por sincronizado cuando la subida inicial termina bien. Cada intento
+                // lee todos los canales, así que se reintenta poco y muy espaciado (antes, cada
+                // 5 minutos, agotaba el límite diario gratuito de lecturas). Con el límite agotado
+                // no se reintenta hasta volver a abrir la app.
+                var waitMs = 30 * 60_000L
+                var attempts = 0
                 while (true) {
                     if (synchronized(this@CloudSync) { uid != newUid }) return@launch
+                    var quota = false
                     val ok = runCatching { uploadAll(newUid) }
                         .onFailure {
                             Log.w(TAG, "uploadAll", it)
                             _status.value = SyncStatus.ERROR
                             _detail.value = explain(it)
+                            quota = (it as? FirebaseFirestoreException)?.code == FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED
                         }
                         .isSuccess
                     if (ok) break
+                    if (quota || ++attempts >= 3) {
+                        synchronized(this@CloudSync) { if (uid == newUid) uid = null }
+                        return@launch
+                    }
                     delay(waitMs)
-                    waitMs = (waitMs * 2).coerceAtMost(5 * 60_000L)
+                    waitMs *= 2
                 }
                 settings.setSyncedUid(newUid)
             }
@@ -200,7 +209,15 @@ class CloudSync(
 
     fun setForeground(value: Boolean) {
         synchronized(this) { foreground = value }
-        scope.launch { updateListeners() }
+        scope.launch {
+            // Al salir un momento (abrir un vídeo, mirar otra app) la escucha sigue unos minutos:
+            // volver a engancharla lee otra vez los canales recientes.
+            if (!value) {
+                delay(5 * 60_000L)
+                if (synchronized(this@CloudSync) { foreground }) return@launch
+            }
+            updateListeners()
+        }
     }
 
     /** Engancha o suelta las escuchas en tiempo real según haya sesión y la app esté a la vista. */
@@ -439,14 +456,14 @@ class CloudSync(
         if (sub != null) putAll(subMap(sub))
         if (states.isNotEmpty()) {
             put("s", states.associate { it.episodeId to stateCode(it) })
-            put("p", states.associate { it.episodeId to (if (it.positionMs > 0) it.positionMs else FieldValue.delete()) })
+            put("p", states.associate { it.episodeId to it.positionMs })
             // "m": datos de los episodios de la Biblioteca; al salir de ella se borran.
             val bulk = isBulk(states)
             val meta = states.mapNotNull { s ->
                 val e = episodes[s.episodeId]
                 when {
                     inLibrary(s, bulk) && e != null -> s.episodeId to episodeMeta(e)
-                    !inLibrary(s, bulk) -> s.episodeId to FieldValue.delete()
+                    !inLibrary(s, bulk) -> s.episodeId to null
                     else -> null
                 }
             }.toMap()
@@ -480,7 +497,7 @@ class CloudSync(
                 val fs = firestore ?: return@runCatching
                 val byChannel = states.filter { it.subscriptionId != null }.groupBy { it.subscriptionId!! }
                 val episodes = libraryEpisodes(byChannel)
-                byChannel.entries.chunked(400).forEach { chunk ->
+                byChannel.entries.chunked(200).forEach { chunk ->
                     val batch = fs.batch()
                     chunk.forEach { (subId, list) -> batch.set(channels(u).document(subId), channelData(null, list, episodes), SetOptions.merge()) }
                     track(batch.commit())
@@ -554,7 +571,7 @@ class CloudSync(
         val statesByChannel = pending.states.groupBy { it.subscriptionId!! }
         val episodes = libraryEpisodes(statesByChannel)
         val channelIds = pending.subs.keys + statesByChannel.keys
-        channelIds.chunked(400).forEach { chunk ->
+        channelIds.chunked(200).forEach { chunk ->
             val batch = fs.batch()
             chunk.forEach { id ->
                 batch.set(channels(u).document(id), channelData(pending.subs[id], statesByChannel[id].orEmpty(), episodes), SetOptions.merge())
