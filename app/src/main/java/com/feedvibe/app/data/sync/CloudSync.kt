@@ -352,7 +352,12 @@ class CloudSync(
         if (pending != null) {
             // Cambios hechos a mano en este dispositivo que la nube aún no conoce. Los vistos
             // automáticos del historial (updatedAt <= 1) no se suben: cada dispositivo los calcula.
-            localStates.values.filterTo(pending.states) { it.updatedAt > 1 && it.episodeId !in seen && it.subscriptionId != null }
+            // Los vistos automáticos recientes también (pocos, y son los que vuelven al actualizar).
+            val recent = db.episodes().recentIds(System.currentTimeMillis() - 60L * 24 * 3600_000).toHashSet()
+            localStates.values.filterTo(pending.states) {
+                it.episodeId !in seen && it.subscriptionId != null &&
+                    (it.updatedAt > 1 || (it.watched && it.episodeId in recent))
+            }
         }
         toApply.chunked(500).forEach { db.states().upsertAll(it) }
         createLibraryEpisodes(docs)

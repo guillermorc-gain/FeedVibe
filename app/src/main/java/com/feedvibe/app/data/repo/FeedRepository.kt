@@ -74,6 +74,8 @@ class FeedRepository(
     companion object {
         /** Episodios vistos que se guardan en el Historial de la Biblioteca. */
         const val HISTORY_KEEP = 200
+        /** Episodios «recientes» (los que puede traer una actualización normal del canal). */
+        const val RECENT_MS = 60L * 24 * 3600_000
     }
 
     fun queueFullHistory(subId: String) {
@@ -464,6 +466,12 @@ class FeedRepository(
                 .copy(watched = true, watchedAt = 0, positionMs = 0, watchLater = false, updatedAt = 1)
         }
         states.chunked(500).forEach { db.states().upsertAll(it) }
+        // Los recientes sí se suben (son pocos por canal): son los que trae cada actualización y,
+        // sin esto, el otro dispositivo los mostraría como «sin ver».
+        val since = System.currentTimeMillis() - RECENT_MS
+        val recent = states.map { it.episodeId }.chunked(500).flatMap { db.episodes().getMany(it) }
+            .filter { it.publishedAt > since }.map { it.id }.toHashSet()
+        if (recent.isNotEmpty()) cloud.pushStates(states.filter { it.episodeId in recent })
     }
 
     // ---------- Estado de episodios ----------
