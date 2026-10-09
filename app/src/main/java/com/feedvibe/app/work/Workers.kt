@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import com.feedvibe.app.FeedVibeApp
 import com.feedvibe.app.data.backup.DriveAuthRequired
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 
 /** Actualiza todos los canales en segundo plano y notifica las novedades. */
@@ -63,6 +64,54 @@ class UpdateCheckWorker(context: Context, params: WorkerParameters) : CoroutineW
     }
 }
 
+/** Alarma que lanza la búsqueda de episodios cada N minutos aunque la app esté cerrada. */
+object RefreshAlarm {
+    private const val REQUEST = 7001
+
+    private fun pending(context: Context) = android.app.PendingIntent.getBroadcast(
+        context, REQUEST, android.content.Intent(context, RefreshAlarmReceiver::class.java),
+        android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    fun schedule(context: Context, intervalMin: Int) {
+        val am = context.getSystemService(android.app.AlarmManager::class.java)
+        am.cancel(pending(context))
+        if (intervalMin <= 0) return
+        val at = System.currentTimeMillis() + intervalMin * 60_000L
+        if (android.os.Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
+            am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, pending(context))
+        } else {
+            am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, pending(context))
+        }
+    }
+}
+
+class RefreshAlarmReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: android.content.Intent) {
+        val c = (context.applicationContext as FeedVibeApp).container
+        val result = goAsync()
+        c.appScope.launch {
+            try {
+                val s = c.settings.current()
+                // La siguiente, y la búsqueda (cuando haya red; con «solo Wi‑Fi», con Wi‑Fi).
+                RefreshAlarm.schedule(context, s.syncIntervalMin)
+                if (s.syncIntervalMin > 0) {
+                    val request = OneTimeWorkRequestBuilder<RefreshWorker>()
+                        .setConstraints(
+                            Constraints.Builder()
+                                .setRequiredNetworkType(if (s.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
+                                .build()
+                        )
+                        .build()
+                    WorkManager.getInstance(context).enqueueUniqueWork("refresh_alarm", ExistingWorkPolicy.KEEP, request)
+                }
+            } finally {
+                result.finish()
+            }
+        }
+    }
+}
+
 object WorkScheduler {
     private const val REFRESH = "refresh"
     private const val REFRESH_NOW = "refresh_now"
@@ -71,6 +120,9 @@ object WorkScheduler {
 
     fun scheduleRefresh(context: Context, intervalMin: Int, wifiOnly: Boolean) {
         val wm = WorkManager.getInstance(context)
+        // Alarma exacta además del trabajo periódico: Android (sobre todo Samsung) retrasa horas
+        // los trabajos de las apps cerradas; la alarma despierta la búsqueda a su hora.
+        RefreshAlarm.schedule(context, intervalMin)
         if (intervalMin <= 0) {
             wm.cancelUniqueWork(REFRESH)
             return

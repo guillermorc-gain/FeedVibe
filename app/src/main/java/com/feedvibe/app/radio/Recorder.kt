@@ -478,6 +478,8 @@ class RecordBootReceiver : BroadcastReceiver() {
         val pending = goAsync()
         app.container.appScope.launch {
             try {
+                // La búsqueda periódica de episodios también se vuelve a programar.
+                com.feedvibe.app.work.RefreshAlarm.schedule(context, app.container.settings.current().syncIntervalMin)
                 val now = System.currentTimeMillis()
                 app.container.settings.editRadioSchedules { list -> list.filter { it.endAtMs > now } }
                 app.container.settings.radioSchedules.first().forEach { job ->

@@ -14,6 +14,7 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -101,6 +102,9 @@
             android:foregroundServiceType="dataSync" />
         <receiver
             android:name=".radio.RecordAlarmReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".work.RefreshAlarmReceiver"
             android:exported="false" />
 
         <!-- Detecta que se cierra la app del todo (quitarla de recientes). -->

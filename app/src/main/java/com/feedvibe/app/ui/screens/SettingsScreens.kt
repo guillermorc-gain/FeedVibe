@@ -266,6 +266,37 @@ fun SyncScreen(nav: NavController, settings: AppSettings) {
                 RadioRow(label, minutes, settings.syncIntervalMin) { update { s -> s.copy(syncIntervalMin = it) } }
             }
         }
+        // Sin esto, Android (sobre todo Samsung) frena o duerme la app cerrada y no busca a su hora.
+        val bgContext = LocalContext.current
+        val power = bgContext.getSystemService(android.os.PowerManager::class.java)
+        var unrestricted by remember { mutableStateOf(power.isIgnoringBatteryOptimizations(bgContext.packageName)) }
+        androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+            unrestricted = power.isIgnoringBatteryOptimizations(bgContext.packageName)
+            onPauseOrDispose {}
+        }
+        Spacer(Modifier.height(8.dp))
+        SettingsGroup {
+            ListItem(
+                headlineContent = { Text(if (unrestricted) "Búsqueda en segundo plano permitida" else "Permitir buscar con la app cerrada") },
+                supportingContent = {
+                    Text(
+                        if (unrestricted) "Android no frena FeedVibe: buscará episodios nuevos a su hora."
+                        else "Toca para que Android no frene FeedVibe (si no, puede tardar horas en buscar). En Samsung, quítala también de «Aplicaciones en suspensión»."
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.clickable(enabled = !unrestricted) {
+                    runCatching {
+                        bgContext.startActivity(
+                            Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                .setData(android.net.Uri.parse("package:${bgContext.packageName}"))
+                        )
+                    }.onFailure {
+                        bgContext.startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                    }
+                },
+            )
+        }
         Spacer(Modifier.height(8.dp))
         SettingsGroup {
             SwitchRow("Solo con Wi-Fi", "No gastar datos móviles en segundo plano", settings.wifiOnly) { update { s -> s.copy(wifiOnly = it) } }
